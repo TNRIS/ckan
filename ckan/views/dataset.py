@@ -438,6 +438,7 @@ def resources(package_type: str, id: str) -> Union[Response, str]:
 
 
 def read(package_type: str, id: str) -> Union[Response, str]:
+    
     context = cast(Context, {
         u'model': model,
         u'session': model.Session,
@@ -488,22 +489,51 @@ def read(package_type: str, id: str) -> Union[Response, str]:
         return h.redirect_to(u'{}.read'.format(package_type),
                              id=pkg_dict['name'])
 
-    # can the resources be previewed?
-    for resource in pkg_dict[u'resources']:
-        resource_views = get_action(u'resource_view_list')(
-            context, {
-                u'id': resource[u'id']
-            }
-        )
-        resource[u'has_views'] = len(resource_views) > 0
+
+    # TWDH Patch Begin
+
+    if len( pkg_dict[u'resources'] ) > 0:
+                
+        # can the resources be previewed?
+
+        # inspect the first (primary) resource vor an available view
+        for resource in pkg_dict[u'resources'][:1]:
+
+            resource_views = get_action(u'resource_view_list')(
+                context, {
+                    u'id': resource[u'id']
+                }
+            )
+            resource[u'has_views'] = len(resource_views) > 0
+            resource[u'resource_views'] = resource_views
+            current_resource_view = None
+            view_id = request.args.get(u'view_id')
+            if resource[u'has_views']:
+                if view_id:
+                    current_resource_view = [
+                        rv for rv in resource_views if rv[u'id'] == view_id
+                    ]
+                    if len(current_resource_view) == 1:
+                        current_resource_view = current_resource_view[0]
+                    else:
+                        return base.abort(404, _(u'Resource view not found'))
+                else:
+                    current_resource_view = resource_views[0]
+
+    else:
+        current_resource_view = None
+
+    # TWDH Patch End
 
     package_type = pkg_dict[u'type'] or package_type
     _setup_template_variables(context, {u'id': id}, package_type=package_type)
 
     template = _get_pkg_template(u'read_template', package_type)
+
     try:
         return base.render(
             template, {
+                u'current_resource_view': current_resource_view,  # TWDH Patch
                 u'dataset_type': package_type,
                 u'pkg_dict': pkg_dict,
                 u'pkg': pkg,
