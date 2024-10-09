@@ -794,6 +794,22 @@ class PerformResetView(MethodView):
                     patch_context,
                     {"id": user_dict['id'], "state": model.State.ACTIVE}
                 )
+
+                # if user_state is 'pending', this was a response to an invite,
+                # so a welcome message is sent
+                name = user_dict['fullname'] or user_dict['name']
+                email = user_dict['email']
+                subject = 'Welcome to the Texas Water Data Hub'
+                extra_vars = {
+                    'login_link': '/user/login',
+                    'site_title': config.get('ckan.site_title'),
+                    'site_url': config.get('ckan.site_url'),
+                    'user_name': name
+                }
+                body = base.render('emails/welcome_user.txt', extra_vars)
+                body_html = base.render('emails/welcome_user.html', extra_vars)
+                mailer.mail_recipient(name, email, subject, body, body_html)
+
             mailer.create_reset_key(context[u'user_obj'])
             signals.perform_password_reset.send(
                 username, user=context[u'user_obj'])
