@@ -85,9 +85,12 @@ def string_to_timedelta(s: str) -> datetime.timedelta:
     return delta
 
 
-def render_activity_email(activities: list[dict[str, Any]]) -> str:
+def render_activity_email(activities: list[dict[str, Any]], html: False) -> str:
     globals = {"site_title": config.get("ckan.site_title")}
-    template_name = "activity_streams/activity_stream_email_notifications.text"
+    if html:
+        template_name = "activity_streams/activity_stream_email_notifications.html"
+    else:
+        template_name = "activity_streams/activity_stream_email_notifications.text"
 
     env = Environment(**jinja_extensions.get_jinja_env_options())
     # Install the given gettext, ngettext callables into the environment
@@ -133,7 +136,8 @@ def _notifications_for_activities(
     ).format(site_title=config.get("ckan.site_title"), n=len(activities))
 
     body = render_activity_email(activities)
-    notifications = [{"subject": subject, "body": body}]
+    body_html = render_activity_email(activities)
+    notifications = [{"subject": subject, "body": body, "body_html": body_html}]
 
     return notifications
 
@@ -221,6 +225,7 @@ def send_notification(
             user["email"],
             email_dict["subject"],
             email_dict["body"],
+            email_dict["body_html"],
         )
     except ckan.lib.mailer.MailerException:
         raise

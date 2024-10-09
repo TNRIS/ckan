@@ -210,7 +210,7 @@ def mail_user(recipient: model.User,
         body, body_html=body_html, headers=headers, attachments=attachments)
 
 
-def get_reset_link_body(user: model.User) -> str:
+def get_reset_link_body(user: model.User, kind: str='txt') -> str:
     extra_vars = {
         'reset_link': get_reset_link(user),
         'site_title': config.get('ckan.site_title'),
@@ -218,12 +218,13 @@ def get_reset_link_body(user: model.User) -> str:
         'user_name': user.name,
     }
     # NOTE: This template is translated
-    return render('emails/reset_password.txt', extra_vars)
+    return render('emails/reset_password.{}'.format( kind ), extra_vars)
 
 
 def get_invite_body(user: model.User,
                     group_dict: Optional[dict[str, Any]] = None,
-                    role: Optional[str] = None) -> str:
+                    role: Optional[str] = None,
+                    kind: str='txt') -> str:
     extra_vars = {
         'reset_link': get_reset_link(user),
         'site_title': config.get('ckan.site_title'),
@@ -240,7 +241,7 @@ def get_invite_body(user: model.User,
         extra_vars['group_title'] = group_dict.get('title')
 
     # NOTE: This template is translated
-    return render('emails/invite_user.txt', extra_vars)
+    return render('emails/invite_user.{}'.format( kind ), extra_vars)
 
 
 def get_reset_link(user: model.User) -> str:
@@ -252,7 +253,8 @@ def get_reset_link(user: model.User) -> str:
 
 def send_reset_link(user: model.User) -> None:
     create_reset_key(user)
-    body = get_reset_link_body(user)
+    body = get_reset_link_body(user,'txt')
+    body_html = get_reset_link_body(user,'html')
     extra_vars = {
         'site_title': config.get('ckan.site_title')
     }
@@ -261,7 +263,7 @@ def send_reset_link(user: model.User) -> None:
     # Make sure we only use the first line
     subject = subject.split('\n')[0]
 
-    mail_user(user, subject, body)
+    mail_user(user, subject, body, body_html)
 
 
 def send_invite(
@@ -269,7 +271,8 @@ def send_invite(
         group_dict: Optional[dict[str, Any]] = None,
         role: Optional[str] = None) -> None:
     create_reset_key(user)
-    body = get_invite_body(user, group_dict, role)
+    body = get_invite_body(user, group_dict, role, 'txt')
+    body_html = get_invite_body(user, group_dict, role, 'html')
     extra_vars = {
         'site_title': config.get('ckan.site_title')
     }
@@ -278,7 +281,7 @@ def send_invite(
     # Make sure we only use the first line
     subject = subject.split('\n')[0]
 
-    mail_user(user, subject, body)
+    mail_user(user, subject, body, body_html)
 
 
 def create_reset_key(user: model.User):
