@@ -123,8 +123,17 @@ def _mail_recipient(
                                    "smtp.password must be configured as well.")
             smtp_connection.login(smtp_user, smtp_password)
 
-        smtp_connection.sendmail(mail_from, [recipient_email], msg.as_string())
-        log.info("Sent email to {0}".format(recipient_email))
+        ccs = []
+        if msg['Cc'] is not None:
+            ccs = msg["Cc"].split( ",")
+        bccs = []
+        if msg['Bcc'] is not None:
+            ccs = msg["Bcc"].split( ",")
+
+        recipients = [recipient_email] + ccs + bccs
+
+        smtp_connection.sendmail(mail_from, recipients, msg.as_string())
+        log.info("Sent email to {0}".format(recipients))
 
     except smtplib.SMTPException as e:
         msg = '%r' % e
