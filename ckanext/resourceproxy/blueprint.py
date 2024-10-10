@@ -80,7 +80,13 @@ def proxy_resource(context: Context, data_dict: DataDict):
                 proxies=proxies,
             )
 
-        response.headers[u'content-type'] = r.headers[u'content-type']
+        if 'content-type' in r.headers:
+            response.headers[u'content-type'] = r.headers[u'content-type']
+        else:
+            return abort(
+                409, 
+                (u'"content-type" header not found.')
+            )
         response.charset = r.encoding or "utf-8"
 
         length = 0
