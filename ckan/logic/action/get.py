@@ -1338,6 +1338,7 @@ def organization_show(context: Context, data_dict: DataDict) -> ActionResult.Org
 
     .. note:: Only its first 10 datasets are returned
     '''
+    context['for_view'] = True
     return _group_or_org_show(context, data_dict, is_org=True)
 
 
