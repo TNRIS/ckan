@@ -4,7 +4,7 @@ from __future__ import annotations
 import cgi
 import json
 import logging
-from typing import Any, cast, Optional, Union
+from typing import Any, Optional, Union, cast
 
 from werkzeug.wrappers.response import Response as WerkzeugResponse
 import flask
@@ -25,7 +25,7 @@ from ckan.views.dataset import (
     _get_pkg_template, _get_package_type, _setup_template_variables
 )
 
-from ckan.types import Context, Response
+from ckan.types import Context, Response, ErrorDict
 
 Blueprint = flask.Blueprint
 NotFound = logic.NotFound
@@ -215,42 +215,66 @@ class CreateView(MethodView):
 
         if not data_provided and save_action != u"go-dataset-complete":
             if save_action == u'go-dataset':
-                # go to final stage of adddataset
+                for plugin in plugins.PluginImplementations(plugins.IFormRedirect):
+                    url = plugin.resource_save_redirect(
+                        package_type, id, None, 'create', save_action, data)
+                    if url:
+                        return h.redirect_to(url)
                 return h.redirect_to(u'{}.edit'.format(package_type), id=id)
-            # see if we have added any resources
+
+            create_on_ui_requires_resources = config.get(
+                'ckan.dataset.create_on_ui_requires_resources'
+            )
+            if create_on_ui_requires_resources:
+                try:
+                    data_dict = get_action('package_show')(context, {'id': id})
+                except NotAuthorized:
+                    return base.abort(403, _('Unauthorized to update dataset'))
+                except NotFound:
+                    return base.abort(
+                        404,
+                        _('The dataset {id} could not be found.').format(id=id)
+                    )
+                if not data_dict['resources']:
+                    msg = _(u'You must add at least one data resource')
+                    # On new templates do not use flash message
+
+                    errors: dict[str, Any] = {}
+                    error_summary = {_(u'Error'): msg}
+                    return self.get(package_type, id, data, errors, error_summary)
+
             try:
-                data_dict = get_action(u'package_show')(context, {u'id': id})
+                get_action('package_patch')(
+                    Context(context, allow_state_change=True),
+                    {'id': id, 'state': 'active'}
+                )
             except NotAuthorized:
-                return base.abort(403, _(u'Unauthorized to update dataset'))
+                return base.abort(403, _('Unauthorized to update dataset'))
             except NotFound:
                 return base.abort(
                     404,
-                    _(u'The dataset {id} could not be found.').format(id=id)
+                    _('The dataset {id} could not be found.').format(id=id)
                 )
-            if not len(data_dict[u'resources']):
-                # no data so keep on page
-                msg = _(u'You must add at least one data resource')
-                # On new templates do not use flash message
-
-                errors: dict[str, Any] = {}
-                error_summary = {_(u'Error'): msg}
+            except ValidationError as e:
+                errors = cast(
+                    "list[ErrorDict]", e.error_dict.get('resources', [{}]))[-1]
+                error_summary = e.error_summary
                 return self.get(package_type, id, data, errors, error_summary)
 
-            # XXX race condition if another user edits/deletes
-            data_dict = get_action(u'package_show')(context, {u'id': id})
-            get_action(u'package_update')(
-                cast(Context, dict(context, allow_state_change=True)),
-                dict(data_dict, state=u'active')
-            )
+            for plugin in plugins.PluginImplementations(plugins.IFormRedirect):
+                url = plugin.resource_save_redirect(
+                    package_type, id, None, 'create', save_action, data)
+                if url:
+                    return h.redirect_to(url)
             return h.redirect_to(u'{}.read'.format(package_type), id=id)
 
         data[u'package_id'] = id
         try:
             if resource_id:
                 data[u'id'] = resource_id
-                get_action(u'resource_update')(context, data)
+                res = get_action(u'resource_update')(context, data)
             else:
-                get_action(u'resource_create')(context, data)
+                res = get_action(u'resource_create')(context, data)
         except ValidationError as e:
             errors = e.error_dict
             error_summary = e.error_summary
@@ -265,24 +289,32 @@ class CreateView(MethodView):
             return base.abort(
                 404, _(u'The dataset {id} could not be found.').format(id=id)
             )
-        if save_action == u'go-metadata':
-            # XXX race condition if another user edits/deletes
-            data_dict = get_action(u'package_show')(context, {u'id': id})
-            get_action(u'package_update')(
-                cast(Context, dict(context, allow_state_change=True)),
-                dict(data_dict, state=u'active')
-            )
-            return h.redirect_to(u'{}.read'.format(package_type), id=id)
-        elif save_action == u'go-dataset':
-            # go to first stage of add dataset
-            return h.redirect_to(u'{}.edit'.format(package_type), id=id)
-        elif save_action == u'go-dataset-complete':
+        if save_action == 'go-metadata':
+            try:
+                get_action('package_patch')(
+                    logic.fresh_context(context),
+                    {'id': id, 'state': 'active'}
+                )
+            except ValidationError as e:
+                errors = cast(
+                    "list[ErrorDict]", e.error_dict.get('resources', [{}]))[-1]
+                error_summary = e.error_summary
+                return self.get(package_type, id, data, errors, error_summary)
 
-            return h.redirect_to(u'{}.read'.format(package_type), id=id)
+        for plugin in plugins.PluginImplementations(plugins.IFormRedirect):
+            url = plugin.resource_save_redirect(
+                package_type, id, res['id'], 'create', save_action, data)
+            if url:
+                return h.redirect_to(url)
+        if save_action in ('go-metadata', 'go-dataset-complete'):
+            return h.redirect_to('{}.read'.format(package_type), id=id)
+        elif save_action == 'go-dataset':
+            # go to first stage of add dataset
+            return h.redirect_to('{}.edit'.format(package_type), id=id)
         else:
             # add more resources
             return h.redirect_to(
-                u'{}_resource.new'.format(package_type),
+                '{}_resource.new'.format(package_type),
                 id=id
             )
 
@@ -359,6 +391,7 @@ class EditView(MethodView):
 
     def post(self, package_type: str, id: str,
              resource_id: str) -> Union[str, Response]:
+        save_action = request.form.get(u'save')
         context = self._prepare(id)
         data = clean_dict(
             dict_fns.unflatten(tuplize_dict(parse_params(request.form)))
@@ -372,11 +405,8 @@ class EditView(MethodView):
 
         data[u'package_id'] = id
         try:
-            if resource_id:
-                data[u'id'] = resource_id
-                get_action(u'resource_update')(context, data)
-            else:
-                get_action(u'resource_create')(context, data)
+            data['id'] = resource_id
+            get_action('resource_update')(context, data)
         except ValidationError as e:
             errors = e.error_dict
             error_summary = e.error_summary
@@ -384,7 +414,13 @@ class EditView(MethodView):
                 package_type, id, resource_id, data, errors, error_summary
             )
         except NotAuthorized:
-            return base.abort(403, _(u'Unauthorized to edit this resource'))
+            return base.abort(403, _('Unauthorized to edit this resource'))
+
+        for plugin in plugins.PluginImplementations(plugins.IFormRedirect):
+            url = plugin.resource_save_redirect(
+                package_type, id, resource_id, 'edit', save_action, data)
+            if url:
+                return h.redirect_to(url)
         return h.redirect_to(
             u'{}_resource.read'.format(package_type),
             id=id, resource_id=resource_id
