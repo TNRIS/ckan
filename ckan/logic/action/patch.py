@@ -51,6 +51,21 @@ def package_patch(
 
     patched = dict(package_dict)
     patched.update(data_dict)
+
+    '''
+    If a tag_string is part of the patch, remove existing tags from the dict
+    so that the tags will be recreated based on the tag_string. Without doing this,
+    when a user is trying to remove tags they don't get deleted.
+    '''
+    if 'tag_string' in data_dict:
+        patched.pop('tags')
+        # Handle case where primary_tags are being completely removed
+        if 'primary_tags' not in data_dict and 'primary_tags' in patched:
+            patched.pop('primary_tags')
+        # Handle case where secondary_tags are being completely removed
+        if 'secondary_tags' not in data_dict and 'secondary_tags' in patched:
+            patched.pop('secondary_tags')
+
     patched['id'] = package_dict['id']
     return _get_action('package_update')(context, patched)
 
