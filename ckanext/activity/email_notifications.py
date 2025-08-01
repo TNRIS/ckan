@@ -135,8 +135,8 @@ def _notifications_for_activities(
         len(activities),
     ).format(site_title=config.get("ckan.site_title"), n=len(activities))
 
-    body = render_activity_email(activities)
-    body_html = render_activity_email(activities)
+    body = render_activity_email(activities,html=False)
+    body_html = render_activity_email(activities,html=True)
     notifications = [{"subject": subject, "body": body, "body_html": body_html}]
 
     return notifications
