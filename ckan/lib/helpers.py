@@ -965,8 +965,8 @@ def _make_menu_item(menu_item: str, title: str, **kw: Any) -> Markup:
 
     link = _link_to(title, menu_item, suppress_active_class=True, **item)
     if active:
-        return literal('<li class="active">') + link + literal('</li>')
-    return literal('<li>') + link + literal('</li>')
+        return literal('<li class="active" aria-label="') + escape(title) + literal('">') + link + literal('</li>')
+    return literal('<li aria-label="' ) + escape(title) + literal('">') + link + literal('</li>')
 
 
 @core_helper
