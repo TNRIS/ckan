@@ -10,6 +10,14 @@ this.ckan.module('resource-view-embed', function ($) {
     $('textarea', modal).on('focus', _selectAllCode).on('mouseup', _preventClick);
     $('input', modal).on('keyup change', _updateValues);
     _updateEmbedCode();
+
+
+    modal.on('shown.bs.modal', function () {
+        // Focus on the first input element within the modal
+        $(this).find('input:first').focus(); 
+    });
+
+
   }
 
   function _onClick (event) {
