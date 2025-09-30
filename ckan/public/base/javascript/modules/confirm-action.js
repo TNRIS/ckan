@@ -39,7 +39,7 @@ this.ckan.module('confirm-action', function (jQuery) {
         '<div class="modal-content">',
         '<div class="modal-header">',
         '<h3 class="modal-title"></h3>',
-        '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>',
+        '<button type="button" class="btn-close" data-bs-dismiss="modal" tabindex="-1" aria-label="Close"></button>',
         '</div>',
         '<div class="modal-body"></div>',
         '<div class="modal-footer">',
@@ -131,6 +131,10 @@ this.ckan.module('confirm-action', function (jQuery) {
         element.find('.btn-primary').text(this._('Confirm'));
         element.find('.btn-cancel').text(this._('Cancel'));
         element.find('.btn-close').attr("aria-label", this._('Close'));
+
+        // Focus cancel button when modal opens
+        element.on('shown.bs.modal', function() { element.find('.btn-cancel').focus(); } );
+
       }
       return this.modal;
     },
