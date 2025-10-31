@@ -48,10 +48,8 @@ import ckan.config
 import ckan.exceptions
 import ckan.model as model
 import ckan.lib.formatters as formatters
-import ckan.lib.maintain as maintain
 import ckan.lib.datapreview as datapreview
 import ckan.logic as logic
-import ckan.lib.uploader as uploader
 import ckan.authz as authz
 import ckan.plugins as p
 import ckan
@@ -1037,7 +1035,8 @@ def humanize_entity_type(entity_type: str, object_type: str,
     Possible purposes(depends on `entity_type` and change over time)::
 
         `add link`: "Add [object]" button on search pages
-        `breadcrumb`: "Home / [object]s / New" section in breadcrums
+        `add association link`: "Add to [object]" button on dataset pages
+        `breadcrumb`: "Home / [object]s / New" section in breadcrumbs
         `content tab`: "[object]s | Groups | Activity" tab on details page
         `create label`: "Home / ... / Create [object]" part of breadcrumb
         `create title`: "Create [object] - CKAN" section of page title
@@ -1051,10 +1050,10 @@ def humanize_entity_type(entity_type: str, object_type: str,
         `my label`: "My [object]s" tab in dashboard
         `name placeholder`: "<[object]>" section of URL preview on object form
         `no any objects`: No objects created yet
-        `no associated label`: no gorups for dataset
+        `no associated label`: no groups for dataset
         `no description`: object has no description
         `no label`: package with no organization
-        `page title`: "Title - [objec]s - CKAN" section of page title
+        `page title`: "Title - [object]s - CKAN" section of page title
         `save label`: "Save [object]" button
         `search placeholder`: "Search [object]s..." placeholder
         `update label`: "Update [object]" button
@@ -1075,6 +1074,7 @@ def humanize_entity_type(entity_type: str, object_type: str,
         u'Humanize %s of type %s for %s', entity_type, object_type, purpose)
     templates = {
         u'add link': _(u"Add {object_type}"),
+        u'add association link': _(u"Add to {object_type}"),
         u'breadcrumb': _(u"{object_type}s"),
         u'content tab': _(u"{object_type}s"),
         u'create label': _(u"Create {object_type}"),
@@ -1121,7 +1121,7 @@ def get_facet_items_dict(
     '''Return the list of unselected facet items for the given facet, sorted
     by count.
 
-    Returns the list of unselected facet contraints or facet items (e.g. tag
+    Returns the list of unselected facet constraints or facet items (e.g. tag
     names like "russian" or "tolstoy") for the given search facet (e.g.
     "tags"), sorted by facet item count (i.e. the number of search results that
     match each facet item).
@@ -1197,6 +1197,26 @@ def has_more_facets(facet: str,
     if limit is not None and len(facets) > limit:
         return True
     return False
+
+
+@core_helper
+def currently_active_facet(facet: str) -> bool:
+    params_items = request.args.keys()
+    expanded_facet = "_" + facet + "_limit"
+    if facet in params_items or expanded_facet in params_items:
+        return True
+    else:
+        return False
+
+
+@core_helper
+def default_collapse_facets():
+    '''Returns config option for `ckan.default_collapse_facets`.
+    If true, the facets in the secondary will be collapsed by default.
+    If false, the facets will all be open, unless closed by the user.
+    Default is false
+    '''
+    return config['ckan.default_collapse_facets']
 
 
 @core_helper
@@ -1286,11 +1306,7 @@ def linked_user(user: Union[str, model.User],
         if maxlength and len(user.display_name) > maxlength:
             displayname = displayname[:maxlength] + '...'
 
-        return literal(u'{icon} {link}'.format(
-            icon=user_image(
-                user.id,
-                size=avatar
-            ),
+        return literal(u'{link}'.format(
             link=link_to(
                 displayname,
                 url_for('user.read', id=name)
@@ -1308,54 +1324,6 @@ def group_name_to_title(name: str) -> str:
 
 
 @core_helper
-@maintain.deprecated("helpers.truncate() is deprecated and will be removed "
-                     "in a future version of CKAN. Instead, please use the "
-                     "builtin jinja filter instead.",
-                     since="2.10.0")
-def truncate(text: str,
-             length: int = 30,
-             indicator: str = '...',
-             whole_word: bool = False) -> str:
-    """Truncate ``text`` with replacement characters.
-
-    ``length``
-        The maximum length of ``text`` before replacement
-    ``indicator``
-        If ``text`` exceeds the ``length``, this string will replace
-        the end of the string
-    ``whole_word``
-        If true, shorten the string further to avoid breaking a word in the
-        middle.  A word is defined as any string not containing whitespace.
-        If the entire text before the break is a single word, it will have to
-        be broken.
-
-    Example::
-
-        >>> truncate('Once upon a time in a world far far away', 14)
-        'Once upon a...'
-
-    Deprecated: please use jinja filter `truncate` instead
-    """
-    if not text:
-        return ""
-    if len(text) <= length:
-        return text
-    short_length = length - len(indicator)
-    if not whole_word:
-        return text[:short_length] + indicator
-    # Go back to end of previous word.
-    i = short_length
-    while i >= 0 and not text[i].isspace():
-        i -= 1
-    while i >= 0 and text[i].isspace():
-        i -= 1
-    if i <= 0:
-        # Entire text before break is one word, or we miscalculated.
-        return text[:short_length] + indicator
-    return text[:i + 1] + indicator
-
-
-@core_helper
 def markdown_extract(text: str,
                      extract_length: int = 190) -> Union[str, Markup]:
     ''' return the plain text representation of markdown encoded text.  That
@@ -1363,7 +1331,7 @@ def markdown_extract(text: str,
     will not be truncated.'''
     if not text:
         return ''
-    plain = RE_MD_HTML_TAGS.sub('', markdown(text))
+    plain = bleach_clean(markdown(text), strip=True)
     if not extract_length or len(plain) < extract_length:
         return literal(plain)
     return literal(
@@ -1824,13 +1792,13 @@ def snippet(template_name: str, **kw: Any) -> str:
 @core_helper
 def convert_to_dict(object_type: str, objs: list[Any]) -> list[dict[str, Any]]:
     ''' This is a helper function for converting lists of objects into
-    lists of dicts. It is for backwards compatability only. '''
+    lists of dicts. It is for backwards compatibility only. '''
 
     import ckan.lib.dictization.model_dictize as md
     converters = {'package': md.package_dictize}
     converter = converters[object_type]
     items = []
-    context: Context = {'model': model}
+    context: Context = {}
     for obj in objs:
         item = converter(obj, context)
         items.append(item)
@@ -1931,7 +1899,7 @@ def add_url_param(alternative_url: Optional[str] = None,
     :py:func:`~ckan.lib.helpers.url_for` controller & action default to the
     current ones
 
-    This can be overriden providing an alternative_url, which will be used
+    This can be overridden providing an alternative_url, which will be used
     instead.
     '''
 
@@ -1969,7 +1937,7 @@ def remove_url_param(key: Union[list[str], str],
     via :py:func:`~ckan.lib.helpers.url_for`
     controller & action default to the current ones
 
-    This can be overriden providing an alternative_url, which will be used
+    This can be overridden providing an alternative_url, which will be used
     instead.
 
     '''
@@ -2165,10 +2133,6 @@ RE_MD_EXTERNAL_LINK = re.compile(
     flags=re.UNICODE
 )
 
-# find all tags but ignore < in the strings so that we can use it correctly
-# in markdown
-RE_MD_HTML_TAGS = re.compile('<[^><]*>')
-
 
 @core_helper
 def html_auto_link(data: str) -> str:
@@ -2228,7 +2192,6 @@ def render_markdown(data: str,
     if allow_html:
         data = markdown(data.strip())
     else:
-        data = RE_MD_HTML_TAGS.sub('', data.strip())
         data = bleach_clean(
             markdown(data), strip=True,
             tags=MARKDOWN_TAGS,
@@ -2462,7 +2425,14 @@ localised_filesize = formatters.localised_filesize
 
 @core_helper
 def uploads_enabled() -> bool:
-    if uploader.get_storage_path():
+    upload_config = config.get('ckan.uploads_enabled')
+    if upload_config is not None:
+        return upload_config
+
+    if config['ckan.storage_path'] is not None:
+        return True
+
+    if len([plugin for plugin in p.PluginImplementations(p.IUploader)]) != 0:
         return True
     return False
 
@@ -2881,4 +2851,8 @@ def make_login_url(
 
 @core_helper
 def csrf_input():
-    return snippet('snippets/csrf_input.html')
+    '''
+    Render a hidden CSRF input field.
+    '''
+    import ckan.lib.base as base
+    return literal(base.render('snippets/csrf_input.html'))
