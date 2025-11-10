@@ -391,9 +391,13 @@ def group_dictize(group: model.Group, context: Context,
             search_context = cast(
                 Context, dict((k, v) for (k, v) in context.items()
                               if k != 'schema'))
-            search_results = logic.get_action('package_search')(
-                search_context, q)
-            return search_results['count'], search_results['results']
+            try:
+                search_results = logic.get_action('package_search')(
+                    search_context, q)
+                return search_results['count'], search_results['results']
+            except:
+                return 0, []
+
 
         if packages_field == 'datasets':
             package_count, packages = get_packages_for_this_group(group)
