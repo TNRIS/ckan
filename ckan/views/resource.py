@@ -436,8 +436,8 @@ class EditView(MethodView):
         except NotFound:
             return base.abort(404, _(u'Resource not found'))
 
-        if pkg_dict[u'state'].startswith(u'draft'):
-            return CreateView().get(package_type, id, data=resource_dict)
+        #if pkg_dict[u'state'].startswith(u'draft'):
+        #    return CreateView().get(package_type, id, data=resource_dict)
 
         # resource is fully created
         resource = resource_dict
