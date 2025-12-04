@@ -52,6 +52,7 @@ cypress.env.json
 
 # cypress
 cypress/videos
+cypress/screenshots
 
 #testing
 junit
