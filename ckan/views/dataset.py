@@ -498,14 +498,25 @@ def read(package_type: str, id: str) -> Union[Response, str]:
 
 
 class CreateView(MethodView):
+
+    def _is_save(self) -> bool:
+        return u'save' in request.form
+
     def _prepare(self) -> Context:  # noqa
 
+        """
         context: cast(Context = {
             u'model': model,
             u'session': model.Session,
             u'user': current_user.name,
             u'auth_user_obj': current_user,
         })
+        """
+        context: Context = {
+            u'user': current_user.name,
+            u'auth_user_obj': current_user,
+            u'save': self._is_save()
+        }
         try:
             check_access('package_create', context)
         except NotAuthorized:
