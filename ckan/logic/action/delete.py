@@ -22,6 +22,12 @@ from ckan.model.follower import ModelFollowingModel
 from ckan.common import _
 from ckan.types import Context, DataDict, ErrorDict, Schema
 
+import os
+from ckanext.s3filestore.uploader import BaseS3Uploader
+from ckanext.s3filestore.s3util import delete_matching_uuid
+import ckantoolkit as toolkit
+config = toolkit.config
+
 log = logging.getLogger('ckan.logic')
 
 # Define some shortcuts
@@ -65,6 +71,18 @@ def user_delete(context: Context, data_dict: DataDict) -> ActionResult.UserDelet
             model.PackageMember.user_id == user.id).all()
     for collaborator in datasets_where_user_is_collaborator:
         collaborator.delete()
+
+    try:
+        s3 = BaseS3Uploader()
+        aws_root = config.get('ckanext.s3filestore.aws_storage_path', '')
+        
+        base_prefix = os.path.join(aws_root, 'storage', 'uploads', 'user')
+        
+        delete_matching_uuid(s3, base_prefix, user.id)
+        log.info('Purged S3 user uploads for %s under %s/', user.id, base_prefix)
+    except Exception as e:
+        # do not block deletion if S3 purge fails
+        log.warning('Failed to purge S3 uploads for user %s: %r', user.id, e)
 
     model.repo.commit()
 

@@ -53,6 +53,19 @@ def datasets() -> str:
     return base.render(u'user/dashboard_datasets.html', extra_vars)
 
 
+def applications() -> str:
+    context = cast(Context, {
+        u'for_view': True,
+        u'user': current_user.name,
+        u'auth_user_obj': current_user
+    })
+    data_dict: dict[str, Any] = {
+        u'user_obj': current_user,
+        u'include_datasets': True}
+    extra_vars = _extra_template_variables(context, data_dict)
+    return base.render(u'user/dashboard_applications.html', extra_vars)
+
+
 def organizations() -> str:
     context = cast(Context, {
         u'for_view': True,
@@ -78,3 +91,4 @@ def groups() -> str:
 dashboard.add_url_rule(u'/datasets', view_func=datasets)
 dashboard.add_url_rule(u'/groups', view_func=groups)
 dashboard.add_url_rule(u'/organizations', view_func=organizations)
+dashboard.add_url_rule(u'/applications', view_func=applications)

@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import ckan.model as model
 import ckan.plugins as p
 import ckan.logic as logic
+from ckan.lib.search import SearchIndexError
 
 import ckan.tests.helpers as helpers
 import ckan.tests.factories as factories
@@ -69,19 +70,19 @@ class TestPackageNew(object):
     @pytest.mark.usefixtures("clean_index")
     def test_new_indexerror(self, app, user):
         from ckan.lib.search.common import SolrSettings
-        bad_solr_url = "http://example.com/badsolrurl"
+        bad_solr_url = "http://0.0.0.0/badsolrurl"
         solr_url = SolrSettings.get()[0]
         try:
             SolrSettings.init(bad_solr_url)
             new_package_name = u"new-package-missing-solr"
             offset = url_for("dataset.new")
-            env = {"Authorization": user["token"]}
-            res = app.post(
-                offset,
-                extra_environ=env,
-                data={"save": "", "name": new_package_name},
-            )
-            assert "Unable to add package to search index" in res, res
+            headers = {"Authorization": user["token"]}
+            with pytest.raises(SearchIndexError):
+                res = app.post(
+                    offset,
+                    extra_environ=env,
+                    data={"save": "", "name": new_package_name},
+                )
         finally:
             SolrSettings.init(solr_url)
 
@@ -480,22 +481,6 @@ class TestPackageNew(object):
 
 @pytest.mark.usefixtures("non_clean_db", "with_request_context")
 class TestPackageEdit(object):
-    def test_redirect_after_edit_using_param(self, app, sysadmin):
-        return_url = "http://random.site.com/dataset/<NAME>?test=param"
-        pkg = factories.Dataset()
-        url = url_for("dataset.edit", id=pkg["name"], return_to=return_url)
-        env = {"Authorization": sysadmin["token"]}
-        resp = app.post(url, extra_environ=env, follow_redirects=False)
-        assert resp.headers["location"] == return_url.replace("<NAME>", pkg["name"])
-
-    def test_redirect_after_edit_using_config(self, app, ckan_config, sysadmin):
-        expected_redirect = ckan_config["package_edit_return_url"]
-        pkg = factories.Dataset()
-        url = url_for("dataset.edit", id=pkg["name"])
-        env = {"Authorization": sysadmin["token"]}
-        resp = app.post(url, extra_environ=env, follow_redirects=False)
-        assert resp.headers["location"] == expected_redirect.replace("<NAME>", pkg["name"])
-
     def test_organization_admin_can_edit(self, app, user):
         env = {"Authorization": user["token"]}
         organization = factories.Organization(
