@@ -232,11 +232,12 @@ class ApiTokenView(MethodView):
             u'type': u'button',
             u'class': u'btn btn-default btn-xs',
             u'data-module': u'copy-into-buffer',
-            u'data-module-copy-value': ensure_str(token)
+            u'data-module-copy-value': ensure_str(token),
+            u'title': u'Copy Token',
         })
         h.flash_success(
             _(
-                u"API Token created: <code style=\"word-break:break-all;\">"
+                u"API Token created: <code style=\"word-break:break-all; color:#0D2856;\">"
                 u"{token}</code> {copy}<br>"
                 u"Make sure to copy it now, "
                 u"you won't be able to see it again!"
