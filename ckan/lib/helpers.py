@@ -746,8 +746,16 @@ def _link_active(kwargs: Any) -> bool:
     highlight_controllers = kwargs.get('highlight_controllers', [])
     if highlight_controllers and blueprint in highlight_controllers:
         return True
-
-    return (kwargs.get('controller') == blueprint and
+    
+    # Workaround: ckan_googleanalytics changes the organization blueprint name,
+    # so we match "<controller>_googleanalytics" to keep nav highlighting working.
+    # TODO: Need to be fixed, preferably in ckan_googleanalytics.
+    
+    blueprint_analytics = ''
+    if  kwargs.get('controller'):
+        blueprint_analytics = kwargs.get('controller') + '_googleanalytics'
+        
+    return ( (kwargs.get('controller') == blueprint or (blueprint_analytics== blueprint)) and
             kwargs.get('action') == endpoint)
 
 
