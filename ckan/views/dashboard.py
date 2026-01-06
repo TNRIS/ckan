@@ -42,11 +42,11 @@ def datasets() -> str:
 
 
 def applications() -> str:
-    context = cast(Context, {
+    context: Context = {
         u'for_view': True,
         u'user': current_user.name,
         u'auth_user_obj': current_user
-    })
+    }
     data_dict: dict[str, Any] = {
         u'user_obj': current_user,
         u'include_datasets': True}
