@@ -761,7 +761,7 @@ class RequestResetView(MethodView):
             _(u'A reset link has been emailed to you '
               '(unless the account specified does not exist)'))
         return h.redirect_to(config.get(
-            u'ckan.user_reset_landing_page'))
+            u'ckan.auth.login_view'))
 
     def get(self) -> str:
         self._prepare()
