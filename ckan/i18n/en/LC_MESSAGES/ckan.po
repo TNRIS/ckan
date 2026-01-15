@@ -3948,7 +3948,8 @@ msgstr ""
 msgid ""
 "A reset link has been emailed to you (unless the account specified does "
 "not exist)"
-msgstr ""
+msgstr "We’ve emailed you a password reset link! If you don’t see it soon,"
+"double-check the email or username you entered and look in your spam folder."
 
 #: ckan/views/user.py:742
 msgid "Unauthorized to reset password."
@@ -3972,7 +3973,7 @@ msgstr ""
 
 #: ckan/views/user.py:798
 msgid "Your password has been reset."
-msgstr ""
+msgstr "Your password has been reset! Log in below using your new password."
 
 #: ckan/views/user.py:907
 msgid "Not authorized to promote user to sysadmin"
