@@ -853,7 +853,7 @@ class PerformResetView(MethodView):
 
             h.flash_success(_(u'Your password has been reset.'))
             return h.redirect_to(config.get(
-                u'ckan.user_reset_landing_page'))
+                u'ckan.auth.login_view'))
 
         except logic.NotAuthorized:
             h.flash_error(_(u'Unauthorized to edit user %s') % id)
