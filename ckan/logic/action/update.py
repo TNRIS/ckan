@@ -1132,14 +1132,14 @@ def _bulk_update_dataset(
         query = search.PackageSearchQuery()
         q_dict = {
             'q': q,
-            'fl': 'data_dict',
+            'fl': 'validated_data_dict',
             'wt': 'json',
             'fq': 'site_id:"%s"' % config.get('ckan.site_id'),
             'rows': BATCH_SIZE
         }
 
         for result in query.run(q_dict)['results']:
-            data_dict = json.loads(result['data_dict'])
+            data_dict = json.loads(result['validated_data_dict'])
             if data_dict['owner_org'] == org_id:
                 data_dict.update(update_dict)
                 psi.index_package(data_dict, defer_commit=True)
