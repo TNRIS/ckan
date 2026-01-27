@@ -529,6 +529,10 @@ def manage_members(id: str, group_type: str, is_organization: bool) -> str:
             u'id': id,
             u'object_type': u'user'
         })
+        pending_members = get_action(u'pending_invite_list')(context, {
+            u'id': id,
+            u'object_type': u'user'
+        })
         data_dict['include_datasets'] = False
         action_name = "organization_show" if is_organization else "group_show"
         group_dict = get_action(action_name)(context, data_dict)
@@ -547,6 +551,7 @@ def manage_members(id: str, group_type: str, is_organization: bool) -> str:
 
     extra_vars: dict[str, Any] = {
         u"members": members,
+        u"pending_members": pending_members,
         u"group_dict": group_dict,
         u"group_type": group_type,
     }

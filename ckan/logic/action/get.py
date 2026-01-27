@@ -195,6 +195,60 @@ def member_list(context: Context, data_dict: DataDict) -> ActionResult.MemberLis
         except KeyError:
             return capacity
 
+    return [(m.table_id, m.table_name, translated_capacity(m.capacity)) for m in q.all()]
+
+def pending_invite_list(context: Context, data_dict: DataDict) -> ActionResult.MemberList:
+    '''Return invited but not accepted members of an organization.
+
+    The user must have permission to 'get' the group.
+
+    :param id: the id or name of the group
+    :type id: string
+    :type object_type: string
+    :param capacity: restrict the members returned to those with a given
+      capacity, e.g. ``'member'``, ``'editor'``, ``'admin'``, ``'public'``,
+      ``'private'`` (optional, default: ``None``)
+    :type capacity: string
+
+    :rtype: list of (id, type, capacity) tuples
+
+    :raises: :class:`ckan.logic.NotFound`: if the group doesn't exist
+
+    '''
+    _check_access('pending_invite_list', context, data_dict)
+    model = context['model']
+
+    group = model.Group.get(_get_or_bust(data_dict, 'id'))
+    if not group:
+        raise NotFound
+
+    obj_type = data_dict.get('object_type', None)
+    capacity = data_dict.get('capacity', None)
+
+    # User must be able to update the group to remove a member from it
+    _check_access('group_show', context, data_dict)
+
+    q = model.Session.query(model.Member)
+    #if obj_type:
+    #    q = model.Member.all(obj_type)
+
+    q = q.filter(model.Member.group_id == group.id).\
+        filter(model.Member.state == "active")
+
+    q = q.filter(model.Member.table_id == model.User.id).\
+        filter(model.User.state == "pending")
+
+    if capacity:
+        q = q.filter(model.Member.capacity == capacity)
+
+    trans = authz.roles_trans()
+
+    def translated_capacity(capacity: str):
+        try:
+            return trans[capacity]
+        except KeyError:
+            return capacity
+
     return [(m.table_id, m.table_name, translated_capacity(m.capacity))
             for m in q.all()]
 

@@ -444,6 +444,11 @@ def member_list(context: Context, data_dict: DataDict) -> AuthResult:
     Visible to all by default.'''
     return {'success': True}
 
+def pending_invite_list(context: Context, data_dict: DataDict) -> AuthResult:
+    '''Check if the users of a given group are visible.
+    Visible to all by default.'''
+    return {'success': True}
+
 def resource_search(context: Context, data_dict: DataDict) -> AuthResult:
     '''Check if resource search is allowed.
     Allowed for all by default.'''
