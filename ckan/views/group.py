@@ -595,7 +595,7 @@ def member_dump(id: str, group_type: str, is_organization: bool):
     except NotFound:
         base.abort(404, _('Members not found'))
 
-    results = [[_('Username'), _('Email'), _('Name'), _('Role')]]
+    results = [[_('Username'), _('Email'), _('Name'), _('Role'), _('Last Active')]]
     for uid, _user, role in members:
         user_obj = model.User.get(uid)
         if not user_obj:
@@ -605,6 +605,7 @@ def member_dump(id: str, group_type: str, is_organization: bool):
             user_obj.email,  # type: ignore
             user_obj.fullname if user_obj.fullname else _('N/A'),
             role,
+            user_obj.last_active,
         ])
 
     output_stream = StringIO()
