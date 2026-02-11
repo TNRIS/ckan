@@ -55,6 +55,8 @@ def set_cache_control_headers_for_response(response: Response) -> Response:
     if allow_cache:
         response.cache_control.public = True
         try:
+            if 'no-cache' in response.cache_control and ( request.url.endswith('.css') or request.url.endswith('.js') ):
+                del response.cache_control["no-cache"]
             cache_expire = config.get(u'ckan.cache_expires')
             response.cache_control.max_age = cache_expire
             response.cache_control.must_revalidate = True
