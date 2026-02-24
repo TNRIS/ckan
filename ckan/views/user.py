@@ -272,10 +272,10 @@ class ApiTokenView(MethodView):
         })
         h.flash_success(
             _(
-                u"API Token created: <code style=\"word-break:break-all; color:#0D2856;\">"
+                u"<p>API Token created:</p> <code style=\"word-break:break-all; color:#0D2856;\">"
                 u"{token}</code> {copy}<br>"
-                u"Make sure to copy it now, "
-                u"you won't be able to see it again!"
+                u"<p style='clear: both;'>Make sure to copy it now, "
+                u"you won't be able to see it again!</p>"
             ).format(token=ensure_str(token), copy=copy_btn),
             True
         )
