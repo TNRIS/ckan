@@ -3948,7 +3948,7 @@ msgstr ""
 msgid ""
 "A reset link has been emailed to you (unless the account specified does "
 "not exist)"
-msgstr "We’ve emailed you a password reset link! If you don’t see it soon,"
+msgstr "We’ve emailed you a password reset link! If you don’t see it soon, "
 "double-check the email or username you entered and look in your spam folder."
 
 #: ckan/views/user.py:742
