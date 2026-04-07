@@ -605,7 +605,7 @@ def member_dump(id: str, group_type: str, is_organization: bool):
             user_obj.email,  # type: ignore
             user_obj.fullname if user_obj.fullname else _('N/A'),
             role,
-            user_obj.last_active,
+            user_obj.last_active.strftime("%Y-%m-%d %H:%M:%S"),
         ])
 
     output_stream = StringIO()
