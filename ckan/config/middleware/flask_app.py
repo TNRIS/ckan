@@ -8,6 +8,7 @@ import importlib
 import inspect
 import pkgutil
 import logging
+import json
 
 from logging.handlers import SMTPHandler
 from typing import Any, Optional, Union, cast
@@ -207,6 +208,8 @@ def make_flask_stack(conf: Union[Config, CKANConfig]) -> CKANApp:
     # Add Jinja2 extensions and filters
     app.jinja_env.filters['empty_and_escape'] = \
         jinja_extensions.empty_and_escape
+    app.jinja_env.filters['from_json'] = \
+        json.loads
 
     # globals work in imported and included templates (like snippets)
     # whereas context processors do not
