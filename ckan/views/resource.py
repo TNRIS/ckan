@@ -504,7 +504,7 @@ class DeleteView(MethodView):
                     id=id
                 )
             else:
-                return h.redirect_to(u'{}.read'.format(package_type), id=id)
+                return h.redirect_to(u'{}_resources'.format(package_type), id=id)
         except NotAuthorized:
             return base.abort(
                 403,
