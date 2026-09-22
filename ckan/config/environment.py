@@ -202,6 +202,8 @@ def update_config() -> None:
     log.info('Loading templates from %s' % jinja2_templates_path)
     template_paths = [jinja2_templates_path]
 
+    log.info('template_paths: {}'.format(template_paths))
+
     extra_template_paths = config.get('extra_template_paths')
     if 'plugin_template_paths' in config:
         template_paths = config['plugin_template_paths'] + template_paths
@@ -210,14 +212,20 @@ def update_config() -> None:
         template_paths = extra_template_paths.split(',') + template_paths
     config['computed_template_paths'] = template_paths
 
+    log.info('computed_template_paths: {}'.format(config['computed_template_paths']))
+
     # Enable pessimistic disconnect handling (added in SQLAlchemy 1.2)
     # to eliminate database errors due to stale pooled connections
     config.setdefault('sqlalchemy.pool_pre_ping', True)
+
+    log.info('set sqlalchemy.pool_pre_ping')
+
     # Initialize SQLAlchemy
     engine = engine_from_config(config)
     model.init_model(engine)
 
     for plugin in p.PluginImplementations(p.IConfigurable):
+        log.info('configuring {}'.format(plugin))
         plugin.configure(config)
 
     # clear other caches
@@ -229,6 +237,7 @@ def update_config() -> None:
     user_table_exists = False
     try:
         user_table_exists = inspect(engine).has_table("user")
+        log.debug("DB user table exists")
     except sqlalchemy.exc.OperationalError:
         log.debug("DB user table does not exist")
 
