@@ -176,6 +176,8 @@ def load(
             _connect_signals(service.get_signal_subscriptions())
         output.append(service)
 
+        log.info( 'Loaded plugin: {}'.format(plugin) )
+
     if plugins:
         plugins_update()
 
