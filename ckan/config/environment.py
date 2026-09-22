@@ -253,7 +253,10 @@ def update_config() -> None:
             # Race condition, user already exists.
             log.debug("Site user already exists")
 
+    log.info("removing config session")
     # Close current session and open database connections to ensure a clean
     # clean environment even if an error occurs later on
     model.Session.remove()
     model.Session.bind.dispose()  # type: ignore
+
+    log.info("update_config complete")
