@@ -62,6 +62,8 @@ def run(ctx: click.Context, host: str, port: str, disable_reloader: bool,
         ssl_key: Optional[str], prefix: Optional[str]):
     """Regenerate JS translations and run the Werkzeug development server"""
 
+    log.info( 'Preparing to run CKAN ...' )
+
     if config.get("debug"):
         warnings.filterwarnings("default", category=CkanDeprecationWarning)
 
