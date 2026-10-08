@@ -37,9 +37,11 @@ this.ckan.module('data-viewer', function (jQuery) {
     },
 
     _recalibrate: function() {
+      /*
       var height = this.el.contents().find('body').outerHeight(true);
       height = Math.max(height, this.options.minHeight);
       this.el.css('height', height + this.options.padding);
+      */
     },
 
     // firefox caches iframes so force it to get fresh content
