@@ -65,10 +65,22 @@ ckan.module('text_view', function (jQuery) {
         },
         error: function(jqXHR, textStatus, errorThrown) {
           if (textStatus == 'error' && jqXHR.responseText) {
-            self.el.html(jqXHR.responseText);
+
+            if( jqXHR.status == 404 ) {
+              self.el.html(self._(
+                'Error 404: resource not found.')
+              );
+            } else if( jqXHR.status == 409 ) {
+              self.el.html(self._(
+                'Error 409: This resource is too large to preview.')
+              );
+            } else {
+              self.el.html(jqXHR.responseText);            
+            }
+
           } else {
             self.el.html(self._(
-              'An error occured during AJAX request. Could not load view.')
+              'An error occurred during AJAX request. Could not load view.')
             );
           }
         }
