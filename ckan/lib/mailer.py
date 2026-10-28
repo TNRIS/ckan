@@ -20,6 +20,7 @@ import ckan
 import ckan.model as model
 import ckan.lib.helpers as h
 from ckan.lib.base import render
+import ckan.lib.jobs as jobs
 
 log = logging.getLogger(__name__)
 AttachmentWithType = Union[
@@ -90,39 +91,6 @@ def _mail_recipient(
         msg.add_attachment(
             _file.read(), filename=name, maintype=main_type, subtype=sub_type)
 
-    # Send the email using Python's smtplib.
-    smtp_server = config.get('smtp.server')
-    smtp_starttls = config.get('smtp.starttls')
-    smtp_user = config.get('smtp.user')
-    smtp_password = config.get('smtp.password')
-
-    try:
-        smtp_connection = smtplib.SMTP(smtp_server)
-    except (socket.error, smtplib.SMTPConnectError) as e:
-        log.exception(e)
-        raise MailerException('SMTP server could not be connected to: "%s" %s'
-                              % (smtp_server, e))
-
-    try:
-        # Identify ourselves and prompt the server for supported features.
-        smtp_connection.ehlo()
-
-        # If 'smtp.starttls' is on in CKAN config, try to put the SMTP
-        # connection into TLS mode.
-        if smtp_starttls:
-            if smtp_connection.has_extn('STARTTLS'):
-                smtp_connection.starttls()
-                # Re-identify ourselves over TLS connection.
-                smtp_connection.ehlo()
-            else:
-                raise MailerException("SMTP server does not support STARTTLS")
-
-        # If 'smtp.user' is in CKAN config, try to login to SMTP server.
-        if smtp_user:
-            assert smtp_password, ("If smtp.user is configured then "
-                                   "smtp.password must be configured as well.")
-            smtp_connection.login(smtp_user, smtp_password)
-
         ccs = []
         if msg['Cc'] is not None:
             ccs = msg["Cc"].split( ",")
@@ -132,16 +100,94 @@ def _mail_recipient(
 
         recipients = [recipient_email] + ccs + bccs
 
-        smtp_connection.sendmail(mail_from, recipients, msg.as_string())
-        log.info("Sent email to {0}".format(recipients))
+        jobs.enqueue_job(
+            _send_email_job,
+            args=[
+                mail_from,
+                recipients,
+                msg.as_string(),
+            ],
+            title='Send email to {}'.format(recipient_email),
+        )
 
-    except smtplib.SMTPException as e:
-        msg = '%r' % e
-        log.exception(msg)
-        raise MailerException(msg)
-    finally:
-        smtp_connection.quit()
+        log.info(
+            "Queued email for %s",
+            recipients
+        )
 
+def _send_email_job(
+            mail_from: str,
+            recipients: list[str],
+            message: str
+    ) -> None:
+
+        smtp_server = config.get('smtp.server')
+        smtp_starttls = config.get('smtp.starttls')
+        smtp_user = config.get('smtp.user')
+        smtp_password = config.get('smtp.password')
+
+        try:
+            smtp_connection = smtplib.SMTP(smtp_server)
+
+        except (socket.error, smtplib.SMTPConnectError) as e:
+            log.exception(e)
+
+            raise MailerException(
+                'SMTP server could not be connected to: "%s" %s'
+                % (smtp_server, e)
+            )
+
+        try:
+            # Identify ourselves and discover SMTP features.
+            smtp_connection.ehlo()
+
+            if smtp_starttls:
+                if smtp_connection.has_extn('STARTTLS'):
+                    smtp_connection.starttls()
+
+                    # EHLO again after establishing TLS.
+                    smtp_connection.ehlo()
+                else:
+                    raise MailerException(
+                        "SMTP server does not support STARTTLS"
+                    )
+
+            if smtp_user:
+                assert smtp_password, (
+                    "If smtp.user is configured then "
+                    "smtp.password must be configured as well."
+                )
+
+                smtp_connection.login(
+                    smtp_user,
+                    smtp_password
+                )
+
+            smtp_connection.sendmail(
+                mail_from,
+                recipients,
+                message
+            )
+
+            log.info(
+                "Sent email to %s",
+                recipients
+            )
+
+        except smtplib.SMTPException as e:
+            error_message = '%r' % e
+
+            log.exception(error_message)
+
+            raise MailerException(error_message)
+
+        finally:
+            try:
+                smtp_connection.quit()
+            except smtplib.SMTPException:
+                log.exception(
+                    "Error closing SMTP connection"
+                )
 
 def mail_recipient(recipient_name: str,
                    recipient_email: str,
