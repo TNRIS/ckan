@@ -18,12 +18,7 @@ def track_request(response: Response) -> Response:
     method = request.environ.get('REQUEST_METHOD')
     if path == '/_tracking' and method == 'POST':
         # wsgi.input is a BytesIO object
-        payload = request.environ['wsgi.input'].read().decode()
-        parts = payload.split('&')
-        data = {}
-        for part in parts:
-            k, v = part.split('=')
-            data[k] = unquote(v)
+        data = request.form
 
         # we want a unique anonomized key for each user so that we do
         # not count multiple clicks from the same user.
