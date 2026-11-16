@@ -111,7 +111,6 @@ def _recent_views(measure_from: datetime.date):
         .order_by(desc("total_views"))
     )
 
-    breakpoint()
     return [
         ViewCount(*t) for t in session.execute(stmt)
     ]  # {'from': measure_from})
