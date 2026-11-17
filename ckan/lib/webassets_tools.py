@@ -6,12 +6,11 @@ from typing import Any
 from typing_extensions import Literal, TypedDict, assert_never
 
 from markupsafe import Markup
-from webassets import Environment
+from webassets.env import Environment
 from webassets.loaders import YAMLLoader
 
 from ckan.common import config, g
 from ckan.lib.io import get_ckan_temp_directory
-
 
 log = logging.getLogger(__name__)
 env: Environment
@@ -79,7 +78,7 @@ def webassets_init() -> None:
 
     env = Environment()
     env.directory = static_path
-    env.debug = config["debug"]
+    env.debug = config["ckan.webassets.debug"]
     env.url = config["ckan.webassets.url"]
 
 
@@ -211,14 +210,8 @@ def get_webassets_path() -> str:
             "ckan.storage_path"
         ) or get_ckan_temp_directory()
 
-        if storage_path:
-            webassets_path = os.path.join(storage_path, "webassets")
+        webassets_path = os.path.join(storage_path, "webassets")
 
-    if not webassets_path:
-        raise RuntimeError(
-            "Either `ckan.webassets.path` or `ckan.storage_path`"
-            " must be specified"
-        )
     return webassets_path
 
 

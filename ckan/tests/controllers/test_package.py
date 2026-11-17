@@ -68,24 +68,18 @@ class TestPackageNew(object):
 
         assert plugin.id_in_dict
 
+    @pytest.mark.ckan_config("solr_url", "http://example.com/badsolrurl")
     @pytest.mark.usefixtures("clean_index")
     def test_new_indexerror(self, app, user):
-        from ckan.lib.search.common import SolrSettings
-        bad_solr_url = "http://example.com/badsolrurl"
-        solr_url = SolrSettings.get()[0]
-        try:
-            SolrSettings.init(bad_solr_url)
-            new_package_name = u"new-package-missing-solr"
-            offset = url_for("dataset.new")
-            headers = {"Authorization": user["token"]}
-            res = app.post(
-                offset,
-                headers=headers,
-                data={"save": "", "name": new_package_name},
-            )
-            assert "Unable to add package to search index" in res, res
-        finally:
-            SolrSettings.init(solr_url)
+        new_package_name = u"new-package-missing-solr"
+        offset = url_for("dataset.new")
+        headers = {"Authorization": user["token"]}
+        res = app.post(
+            offset,
+            headers=headers,
+            data={"save": "", "name": new_package_name},
+        )
+        assert "Unable to add package to search index" in res, res
 
     def test_change_locale(self, app, user):
         url = url_for("dataset.new")
@@ -451,7 +445,7 @@ class TestPackageNew(object):
 
     def test_unauthed_user_creating_dataset(self, app):
 
-        # provide REMOTE_ADDR to idenfity as remote user, see
+        # provide REMOTE_ADDR to identify as remote user, see
         # ckan.views.identify_user() for details
         app.post(
             url=url_for("dataset.new"),
@@ -1071,6 +1065,20 @@ class TestResourceNew(object):
                 status=403,
             )
 
+    def test_edit_resource_for_dataset_that_does_not_exist_404s(
+        self, app, user
+    ):
+        headers = {"Authorization": user["token"]}
+        response = app.get(
+            url_for(
+                "dataset_resource.edit",
+                id="does-not-exist",
+                resource_id="does-not-exist",
+            ),
+            headers=headers,
+        )
+        assert response.status_code == 404
+
 
 @pytest.mark.usefixtures("non_clean_db", "with_plugins")
 class TestResourceDownload(object):
@@ -1092,7 +1100,7 @@ class TestResourceDownload(object):
 
         response = app.get(url)
 
-        assert response.headers[u"Content-Type"] == u"text/csv"
+        assert response.headers[u"Content-Type"] == u"text/csv; charset=utf-8"
 
 
 @pytest.mark.ckan_config("ckan.plugins", "image_view")
@@ -1116,7 +1124,7 @@ class TestResourceView(object):
         response = app.post(
             url,
             headers={"Authorization": user["token"]},
-            data={"title": "Test Image View"}
+            data={"title": "Test Image View", "view_type": "image_view"}
         )
         assert helpers.body_contains(response, "Test Image View")
 

@@ -10,11 +10,14 @@
   {% endif %}
 {%- endmacro %}
 
-<div id="followee-filter" class="pull-right">
+<div id="followee-filter" class="float-end">
   <div class="dropdown">
-    <a href="#" id="followee-popover" class="btn btn-secondary dropdown-toggle"
+    <a href="#" id="followee-popover" class="followee-toggle"
       aria-label="{{ _('Activity from:') }} {{ context.context }}">
-      <span>{{ _('Activity from:') }}</span> <strong>{{ context.context }}</strong> <span class="caret"></span>
+      <span class="dropdown-content">
+        <span class="label">{{ _('Activity from:') }}</span> {{ context.context }}
+      </span>
+      <span class="caret"><i class="fa-solid fa-angle-down"></i></span>
     </a>
   </div>
 
@@ -31,7 +34,7 @@
         <li class="nav-item everything {% if context.selected_id == False %} active{% endif %}">
           <a class="nav-link" href="{{ h.url_for('activity.dashboard') }}">
             <i class="fa fa-star"></i>
-            <span>Everything</span>
+            <span>{{ _('Everything') }}</span>
           </a>
         </li>
         {% for followee in followees %}

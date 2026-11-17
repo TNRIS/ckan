@@ -63,99 +63,153 @@ describe('ckan.modules.AutocompleteModule()', {testIsolation: false}, function (
 
   describe('.setupAutoComplete()', {testIsolation: false}, function () {
     it('should initialize the autocomplete plugin', function () {
+      var dataAdapter = {};
+      cy.stub(this.module, 'dataAdapter').returns(dataAdapter)
+
+      var Utils = this.select2.amd.require('select2/utils');
+      var Tags = this.select2.amd.require('select2/data/tags');
+      var decorate = cy.stub(Utils, 'Decorate').returns(dataAdapter)
+
       this.module.setupAutoComplete();
 
+      expect(decorate).to.be.calledWith(dataAdapter, Tags);
       expect(this.select2).to.be.called;
       expect(this.select2).to.be.calledWith({
         width: 'resolve',
-        query: this.module._onQuery,
         dropdownCssClass: '',
-        containerCssClass: '',
-        formatResult: this.module.formatResult,
-        formatNoMatches: this.module.formatNoMatches,
-        formatInputTooShort: this.module.formatInputTooShort,
-        createSearchChoice: this.module.formatTerm, // Not used by tags.
-        initSelection: this.module.formatInitialValue,
-	      tokenSeparators: [','],
+        selectionCssClass: '',
+        language: {
+          noResults: this.module.formatNoMatches,
+          inputTooShort: this.module.formatInputTooShort,
+          searching: this.module.formatSearching,
+        },
+        templateResult: this.module.templateResult,
+        createTag: this.module.formatTerm,
+        dataAdapter: dataAdapter,
+        tokenSeparators: [','],
         minimumInputLength: 0
       });
     });
 
-    it('should initialize the autocomplete plugin with a tags callback if options.tags is true', function () {
+    it('should not create new values if options.createtags is false', function () {
+      var dataAdapter = {};
+      cy.stub(this.module, 'dataAdapter').returns(dataAdapter)
+
+      var Utils = this.select2.amd.require('select2/utils');
+      var decorate = cy.spy(Utils, 'Decorate');
+
+      this.module.options.createtags = false;
+      this.module.setupAutoComplete();
+
+      var settings = this.select2.firstCall.args[0];
+      expect(decorate).not.to.be.called;
+      expect(settings.dataAdapter).to.equal(dataAdapter);
+      expect(settings.createTag({term: 'custom'})).to.be.undefined;
+    });
+
+    it('should initialize the autocomplete plugin with a multiple attribute if options.tags is true', function () {
+      cy.stub(this.module, 'dataAdapter').returns({})
+
+      var Utils = this.select2.amd.require('select2/utils');
+      cy.stub(Utils, 'Decorate').returns({})
+
       this.module.options.tags = true;
       this.module.setupAutoComplete();
 
       expect(this.select2).to.be.called;
       expect(this.select2).to.calledWith({
         width: 'resolve',
-        tags: this.module._onQuery,
         dropdownCssClass: '',
-        containerCssClass: '',
-        formatResult: this.module.formatResult,
-        formatNoMatches: this.module.formatNoMatches,
-        formatInputTooShort: this.module.formatInputTooShort,
-        initSelection: this.module.formatInitialValue,
+        selectionCssClass: '',
+        language: {
+          noResults: this.module.formatNoMatches,
+          inputTooShort: this.module.formatInputTooShort,
+          searching: this.module.formatSearching,
+        },
+        templateResult: this.module.templateResult,
+        createTag: this.module.formatTerm,
+        dataAdapter: {},
+        multiple: "multiple",
         tokenSeparators: [','],
         minimumInputLength: 0
       });
     })
-    it('should watch the keydown event on the select2 input');
 
     it('should allow a custom css class to be added to the dropdown', function () {
+      cy.stub(this.module, 'dataAdapter').returns({})
+
+      var Utils = this.select2.amd.require('select2/utils');
+      cy.stub(Utils, 'Decorate').returns({})
+
       this.module.options.dropdownClass = 'tags';
       this.module.setupAutoComplete();
 
       expect(this.select2).to.be.called;
       expect(this.select2).to.be.calledWith({
         width: 'resolve',
-        query: this.module._onQuery,
         dropdownCssClass: 'tags',
-        containerCssClass: '',
-        formatResult: this.module.formatResult,
-        formatNoMatches: this.module.formatNoMatches,
-        formatInputTooShort: this.module.formatInputTooShort,
-        createSearchChoice: this.module.formatTerm, // Not used by tags.
-        initSelection: this.module.formatInitialValue,
+        selectionCssClass: '',
+        language: {
+          noResults: this.module.formatNoMatches,
+          inputTooShort: this.module.formatInputTooShort,
+          searching: this.module.formatSearching,
+        },
+        templateResult: this.module.templateResult,
+        createTag: this.module.formatTerm,
+        dataAdapter: {},
         tokenSeparators: [','],
         minimumInputLength: 0
       });
     });
 
     it('should allow a custom css class to be added to the container', function () {
+      cy.stub(this.module, 'dataAdapter').returns({})
+
+      var Utils = this.select2.amd.require('select2/utils');
+      cy.stub(Utils, 'Decorate').returns({})
+
       this.module.options.containerClass = 'tags';
       this.module.setupAutoComplete();
 
       expect(this.select2).to.be.called;
       expect(this.select2).to.be.calledWith({
         width: 'resolve',
-        query: this.module._onQuery,
         dropdownCssClass: '',
-        containerCssClass: 'tags',
-        formatResult: this.module.formatResult,
-        formatNoMatches: this.module.formatNoMatches,
-        formatInputTooShort: this.module.formatInputTooShort,
-        createSearchChoice: this.module.formatTerm, // Not used by tags.
-        initSelection: this.module.formatInitialValue,
+        selectionCssClass: 'tags',
+        language: {
+          noResults: this.module.formatNoMatches,
+          inputTooShort: this.module.formatInputTooShort,
+          searching: this.module.formatSearching,
+        },
+        templateResult: this.module.templateResult,
+        createTag: this.module.formatTerm,
+        dataAdapter: {},
         tokenSeparators: [','],
         minimumInputLength: 0
       });
     });
 
     it('should allow a changing minimumInputLength', function () {
+      cy.stub(this.module, 'dataAdapter').returns({})
+      var Utils = this.select2.amd.require('select2/utils');
+      cy.stub(Utils, 'Decorate').returns({})
+
       this.module.options.minimumInputLength = 3;
       this.module.setupAutoComplete();
 
       expect(this.select2).to.be.called;
       expect(this.select2).to.be.calledWith({
         width: 'resolve',
-        query: this.module._onQuery,
         dropdownCssClass: '',
-        containerCssClass: '',
-        formatResult: this.module.formatResult,
-        formatNoMatches: this.module.formatNoMatches,
-        formatInputTooShort: this.module.formatInputTooShort,
-        createSearchChoice: this.module.formatTerm, // Not used by tags.
-        initSelection: this.module.formatInitialValue,
+        selectionCssClass: '',
+        language: {
+          noResults: this.module.formatNoMatches,
+          inputTooShort: this.module.formatInputTooShort,
+          searching: this.module.formatSearching,
+        },
+        templateResult: this.module.templateResult,
+        createTag: this.module.formatTerm,
+        dataAdapter: {},
         tokenSeparators: [','],
         minimumInputLength: 3
       });
@@ -209,38 +263,52 @@ describe('ckan.modules.AutocompleteModule()', {testIsolation: false}, function (
     it('should cancel the last request');
   });
 
-  describe('.formatResult(state)', {testIsolation: false}, function () {
+  describe('.templateResult(state)', {testIsolation: false}, function () {
     beforeEach(function () {
       this.module._lastTerm = 'term';
     });
 
     it('should return the string with the last term wrapped in bold tags', function () {
-      let target = this.module.formatResult({id: 'we have termites', text: 'we have termites'});
-      assert.equal(target, 'we have <b>term</b>ites');
+      let target = this.module.templateResult({id: 'we have termites', text: 'we have termites'});
+      expect(target).to.have.html('we have <b>term</b>ites')
     });
 
     it('should return the string with each instance of the term wrapped in bold tags', function () {
-      let target = this.module.formatResult({id: 'we have a termite terminology', text: 'we have a termite terminology'});
-      assert.equal(target, 'we have a <b>term</b>ite <b>term</b>inology');
+      let target = this.module.templateResult({id: 'we have a termite terminology', text: 'we have a termite terminology'});
+      expect(target).to.have.html( 'we have a <b>term</b>ite <b>term</b>inology');
     });
 
     it('should return the term if there is no last term saved', function () {
       delete this.module._lastTerm;
-      let target = this.module.formatResult({id: 'we have a termite terminology', text: 'we have a termite terminology'});
-      assert.equal(target, 'we have a termite terminology');
+      let target = this.module.templateResult({id: 'we have a termite terminology', text: 'we have a termite terminology'});
+      expect(target).to.have.html('we have a termite terminology');
     });
   });
 
   describe('.formatNoMatches(term)', {testIsolation: false}, function () {
+    beforeEach(function () {
+      this.module.options.source = 'http://example.com?term=?';
+      this.target = cy.stub(this.sandbox.client, 'getCompletions');
+    });
+
     it('should return the no matches string if there is a term', function () {
-      var target = this.module.formatNoMatches('term');
+      this.module._lastTerm = 'term';
+      var target = this.module.formatNoMatches();
       assert.equal(target, 'No matches found');
     });
 
     it('should return the empty string if there is no term', function () {
-      var target = this.module.formatNoMatches('');
+      delete this.module._lastTerm;
+      var target = this.module.formatNoMatches();
       assert.equal(target, 'Start typing…');
     });
+
+    it('should return the no matches string if there is no term and no source', function () {
+      delete this.module.options.source;
+      delete this.module._lastTerm;
+      var target = this.module.formatNoMatches();
+      assert.equal(target, 'No matches found');
+    })
   });
 
   describe('.formatInputTooShort(term, min)', {testIsolation: false}, function () {

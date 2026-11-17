@@ -105,6 +105,9 @@ from ckan.model.api_token import (
     ApiToken,
 )
 
+from ckan.model.file import File
+from ckan.model.file_owner import FileOwner, FileOwnerTransferHistory
+
 import ckan.migration
 from ckan.common import config
 from sqlalchemy.engine import Engine
@@ -127,7 +130,8 @@ __all__ = [
     "get_system_info", "set_system_info", "delete_system_info",
     "DomainObjectOperation", "DomainObject", "Dashboard", "ApiToken",
     "init_model", "Repository",
-    "repo", "is_id", "parse_db_config"
+    "repo", "is_id", "parse_db_config",
+    "File", "FileOwner", "FileOwnerTransferHistory",
 ]
 
 log = logging.getLogger(__name__)
@@ -217,6 +221,7 @@ class Repository():
         if not self.tables_created_and_initialised:
             self.upgrade_db()
             self.tables_created_and_initialised = True
+        User.ensure_site_user()
         log.info('Database initialised')
 
     def clean_db(self) -> None:

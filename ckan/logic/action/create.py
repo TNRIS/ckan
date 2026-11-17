@@ -29,6 +29,7 @@ import ckan.authz as authz
 
 from ckan import model
 from ckan.common import _, asbool
+from ckan.lib.search import rebuild
 from ckan.types import Context, DataDict, ErrorDict, Schema
 
 # FIXME this looks nasty and should be shared better
@@ -605,6 +606,8 @@ def member_create(context: Context,
     model.Session.add(member)
     if not context.get("defer_commit"):
         model.repo.commit()
+        if isinstance(obj, model.Package):
+            rebuild(obj.id)
 
     return model_dictize.member_dictize(member, context)
 
@@ -750,9 +753,11 @@ def _group_or_org_create(context: Context,
     return_id_only = context.get('return_id_only', False)
     action = 'organization_show' if is_org else 'group_show'
 
-    output = context['id'] if return_id_only \
-        else _get_action(action)(context, {'id': group.id})
-    return output
+    if return_id_only:
+        return context['id']
+
+    return _get_action(action)(context, {
+        'id': group.id, 'include_users': 'users' in data})
 
 
 def group_create(context: Context,
@@ -909,7 +914,7 @@ def user_create(context: Context,
     :type fullname: string
     :param about: a description of the new user (optional)
     :type about: string
-    :param image_url: the URL to an image to be displayed on the group's page
+    :param image_url: the URL to an image to be displayed on the user's page
         (optional)
     :type image_url: string
     :param plugin_extras: private extra user data belonging to plugins.
@@ -1206,12 +1211,11 @@ def follow_user(context: Context,
     :rtype: dictionary
 
     '''
-    if not context.get('user'):
-        raise NotAuthorized(_("You must be logged in to follow users"))
+    _check_access('follow_user', context, data_dict)
 
     userobj = model.User.get(context['user'])
     if not userobj:
-        raise NotAuthorized(_("You must be logged in to follow users"))
+        raise NotFound(_("User not found"))
 
     schema = context.get('schema',
                          ckan.logic.schema.default_follow_user_schema())
@@ -1260,12 +1264,11 @@ def follow_dataset(context: Context,
     :rtype: dictionary
 
     '''
-    if not context.get('user'):
-        raise NotAuthorized(_("You must be logged in to follow users"))
+    _check_access('follow_dataset', context, data_dict)
 
     userobj = model.User.get(context['user'])
     if not userobj:
-        raise NotAuthorized(_("You must be logged in to follow users"))
+        raise NotFound(_("User not found"))
 
     schema = (context.get('schema') or
               ckan.logic.schema.default_follow_dataset_schema())
@@ -1394,12 +1397,11 @@ def follow_group(context: Context,
     :rtype: dictionary
 
     '''
-    if not context.get('user'):
-        raise NotAuthorized(_("You must be logged in to follow users"))
+    _check_access('follow_group', context, data_dict)
 
     userobj = model.User.get(context['user'])
     if not userobj:
-        raise NotAuthorized(_("You must be logged in to follow users"))
+        raise NotFound(_("User not found"))
 
     schema = context.get('schema',
                          ckan.logic.schema.default_follow_group_schema())
@@ -1440,6 +1442,15 @@ def api_token_create(context: Context,
     :type user: string
     :param name: distinctive name for API Token
     :type name: string
+    :param created_at: datetime string for when the API Token was made.
+        Only sysadmin users may set this value, used for data migrations.
+    :type created_at: timestamp
+    :param id: UUID of the API Token (a.k.a the encoded token).
+        Only sysadmin users may set this value, used for data migrations.
+    :type id: string
+    :param last_access: datetime string for when the API Token was last used.
+        Only sysadmin users may set this value, used for data migrations.
+    :type last_access: timestamp
 
     :returns: Returns a dict with the key "token" containing the
               encoded token value. Extensions can provide additional
@@ -1448,7 +1459,7 @@ def api_token_create(context: Context,
     :rtype: dictionary
 
     """
-    user, name = _get_or_bust(data_dict, [u'user', u'name'])
+    user, _name = _get_or_bust(data_dict, [u'user', u'name'])
 
     if model.User.get(user) is None:
         raise NotFound("User not found")
@@ -1465,7 +1476,7 @@ def api_token_create(context: Context,
         raise ValidationError(errors)
 
     token_obj = model_save.api_token_save(
-        {u'user': user, u'name': name}, context
+        validated_data_dict, context
     )
     model.Session.commit()
     data = {

@@ -1,6 +1,8 @@
 # encoding: utf-8
 
 import json
+from time import sleep
+
 import pytest
 
 import sqlalchemy as sa
@@ -20,9 +22,9 @@ from ckanext.datastore.tests.helpers import (
 )
 
 
+@pytest.mark.ckan_config("ckan.plugins", "datastore")
+@pytest.mark.usefixtures("with_plugins", "with_request_context")
 class TestDatastoreDelete(object):
-    @pytest.mark.ckan_config("ckan.plugins", "datastore")
-    @pytest.mark.usefixtures("clean_datastore", "with_plugins", "with_request_context")
     def test_delete_basic(self):
         resource = factories.Resource(url_type='datastore')
         data = {
@@ -69,8 +71,6 @@ class TestDatastoreDelete(object):
         )
         assert results.rowcount == 0
 
-    @pytest.mark.ckan_config("ckan.plugins", "datastore")
-    @pytest.mark.usefixtures("clean_datastore", "with_plugins", "with_request_context")
     def test_calculate_record_count_is_false(self):
         resource = factories.Resource()
         data = {
@@ -95,9 +95,6 @@ class TestDatastoreDelete(object):
         last_analyze = when_was_last_analyze(resource["id"])
         assert last_analyze is None
 
-    @pytest.mark.ckan_config("ckan.plugins", "datastore")
-    @pytest.mark.usefixtures("clean_datastore", "with_plugins", "with_request_context")
-    @pytest.mark.flaky(reruns=2)  # because analyze is sometimes delayed
     def test_calculate_record_count(self):
         resource = factories.Resource()
         data = {
@@ -120,13 +117,56 @@ class TestDatastoreDelete(object):
             "force": True,
         }
         helpers.call_action("datastore_delete", **data)
-        last_analyze = when_was_last_analyze(resource["id"])
-        assert last_analyze is not None
+        def has_la():
+            return when_was_last_analyze(resource["id"]) is not None
+        # retry because analyze is sometimes delayed
+        assert has_la() or sleep(.5) or has_la()
+
+    def test_delete_does_not_include_records_by_default(self):
+        resource = factories.Resource(url_type="datastore")
+        data = {
+            "resource_id": resource["id"],
+            "fields": [
+                {"id": "movie", "type": "text"},
+                {"id": "directors", "type": "text"},
+            ],
+            "records": [{"movie": "Cats", "director": "Tom Hooper"}]
+        }
+        helpers.call_action("datastore_create", **data)
+
+        data = {
+            "resource_id": resource["id"],
+            "filters": {"director": "Tom Hooper"}
+        }
+        result = helpers.call_action("datastore_delete", **data)
+        assert 'deleted_records' not in result
+
+    def test_delete_include_records_return(self):
+        resource = factories.Resource(url_type="datastore")
+        data = {
+            "resource_id": resource["id"],
+            "fields": [
+                {"id": "movie", "type": "text"},
+                {"id": "directors", "type": "text"},
+            ],
+            "records": [{"movie": "Cats", "director": "Tom Hooper"}]
+        }
+        helpers.call_action("datastore_create", **data)
+
+        data = {
+            "resource_id": resource["id"],
+            "filters": {"director": "Tom Hooper"},
+            "include_deleted_records": True
+        }
+        result = helpers.call_action("datastore_delete", **data)
+        assert 'deleted_records' in result
+        for r in result['deleted_records']:
+            assert '_id' in r
 
 
+@pytest.mark.ckan_config("ckan.plugins", "datastore")
+@pytest.mark.usefixtures("with_plugins", "with_request_context")
 class TestDatastoreRecordsDelete(object):
-    @pytest.mark.ckan_config("ckan.plugins", "datastore")
-    @pytest.mark.usefixtures("clean_datastore", "with_plugins", "with_request_context")
     def test_delete_records_basic(self):
         resource = factories.Resource(url_type='datastore')
         data = {
@@ -174,10 +214,8 @@ class TestDatastoreRecordsDelete(object):
 
         # job scheduled to update last_modified
         assert job_from_id(
-            f"{resource.id} datastore patch last_modified")
+            f"{resource.id}_datastore-patch-last_modified")
 
-    @pytest.mark.ckan_config("ckan.plugins", "datastore")
-    @pytest.mark.usefixtures("clean_datastore", "with_plugins", "with_request_context")
     def test_delete_records_required_filters(self):
         resource = factories.Resource()
         data = {
@@ -208,8 +246,51 @@ class TestDatastoreRecordsDelete(object):
         err = ve.value.error_dict
         assert err == expected
 
-    @pytest.mark.ckan_config("ckan.plugins", "datastore")
-    @pytest.mark.usefixtures("clean_datastore", "with_plugins", "with_request_context")
+    def test_delete_records_does_not_include_records_by_default(self):
+        resource = factories.Resource(url_type="datastore")
+        data = {
+            "resource_id": resource["id"],
+            "fields": [
+                {"id": "movie", "type": "text"},
+                {"id": "directors", "type": "text"},
+            ],
+            "force": True,
+            "records": [{"movie": "Cats", "director": "Tom Hooper"}]
+        }
+        helpers.call_action("datastore_create", **data)
+
+        data = {
+            "resource_id": resource["id"],
+            "force": True,
+            "filters": {"director": "Tom Hooper"}
+        }
+        result = helpers.call_action("datastore_records_delete", **data)
+        assert 'deleted_records' not in result
+
+    def test_delete_records_include_records_return(self):
+        resource = factories.Resource(url_type="datastore")
+        data = {
+            "resource_id": resource["id"],
+            "fields": [
+                {"id": "movie", "type": "text"},
+                {"id": "directors", "type": "text"},
+            ],
+            "force": True,
+            "records": [{"movie": "Cats", "director": "Tom Hooper"}]
+        }
+        helpers.call_action("datastore_create", **data)
+
+        data = {
+            "resource_id": resource["id"],
+            "filters": {"director": "Tom Hooper"},
+            "force": True,
+            "include_deleted_records": True
+        }
+        result = helpers.call_action("datastore_records_delete", **data)
+        assert 'deleted_records' in result
+        for r in result['deleted_records']:
+            assert '_id' in r
+
     def test_delete_records_text_int_filter(self):
         resource = factories.Resource()
         data = {
@@ -569,3 +650,56 @@ class TestDatastoreFunctionDelete(object):
             name=u"test_not_there_either",
             if_exists=True,
         )
+
+
+@pytest.mark.ckan_config("ckan.plugins", "datastore")
+@pytest.mark.usefixtures("with_plugins", "with_request_context")
+def test_delete_schedules_record_count():
+    resource = factories.Resource(url_type="datastore")
+    data = {
+        "resource_id": resource["id"],
+        "fields": [{"id": "value", "type": "numeric"}],
+        "records": [
+            {"value": 1},
+            {"value": 2},
+            {"value": 3},
+            {"value": 4},
+            {"value": 5},
+            {"value": 6},
+            {"value": 7},
+        ],
+    }
+    jobid = f'{resource["id"]}_calculate-record-count'
+
+    helpers.call_action("datastore_create", **data)
+
+    job_from_id(jobid).delete()
+    # job removed
+    with pytest.raises(KeyError):
+        job_from_id(jobid)
+
+    data = {
+        "resource_id": resource["id"],
+        "filters": {
+            "value": [1, 2, 3]
+        }
+    }
+    helpers.call_action("datastore_records_delete", **data)
+
+    assert job_from_id(jobid)
+
+    with db.get_write_engine().connect() as conn:
+        stats = conn.execute(sa.text(
+            "select stats from _table_stats where resource_id=:resource_id"
+            ), {'resource_id': resource['id']}
+        )
+    assert not list(stats)  # stats not calculated yet
+
+    job_from_id(jobid).perform()
+
+    with db.get_write_engine().connect() as conn:
+        stats = conn.execute(sa.text(
+            "select stats from _table_stats where resource_id=:resource_id"
+            ), {'resource_id': resource['id']}
+        )
+    assert list(stats) == [({"rows": 4},)]

@@ -123,7 +123,7 @@ Creating a plugin class
    extension's features.
 
 
-``cookiecutter`` should have created the following file file
+``cookiecutter`` should have created the following file
 ``ckanext-iauthfunctions/ckanext/iauthfunctions/plugin.py``.
 Edit it to match the following:
 
@@ -169,13 +169,13 @@ we can use our plugin, we must install our extension into our CKAN virtual
 environment.
 
 Make sure your virtualenv is activated, change to the extension's
-directory, and run ``python setup.py develop``:
+directory, and run ``pip install -e .``:
 
 .. parsed-literal::
 
    |activate|
    cd |virtualenv|/src/ckanext-iauthfunctions
-   python setup.py develop
+   pip install -e .
 
 
 Enabling the plugin
@@ -219,10 +219,10 @@ then:
 * Check that the name you've used for your plugin in your CKAN config file is
   the same as the name you've used in your extension's ``setup.py`` file
 
-* Check that you've run ``python setup.py develop`` in your extension's
+* Check that you've run ``pip install -e .`` in your extension's
   directory, with your CKAN virtual environment activated. Every time you add
   a new plugin to your extension's ``setup.py`` file, you need to run
-  ``python setup.py develop`` again before you can use the new plugin.
+  ``pip install -e .`` again before you can use the new plugin.
 
 ``ImportError``
 ---------------
@@ -530,6 +530,13 @@ for writing CKAN extensions, including:
 * Using the :doc:`plugins toolkit <plugins-toolkit>`
 * Handling exceptions
 
+.. seealso::
+
+   Now that you've built your extension, consider sharing it with the CKAN
+   community by listing it on the `CKAN Ecosystem catalog
+   <https://ecosystem.ckan.org/extension/>`_. It's a great way to let other
+   users discover and explore your work.
+
 
 Troubleshooting
 ===============
@@ -545,7 +552,7 @@ it means that your plugin class does not implement one of the plugin
 interface's methods. A plugin must implement every method of every plugin
 interface that it implements.
 
-.. todo:: Can you user inherit=True to avoid having to implement them all?
+.. todo:: Can you use inherit=True to avoid having to implement them all?
 
 Other ``AttributeError``\ s can happen if your method returns the wrong type of
 value, check the documentation for each plugin interface method to see what

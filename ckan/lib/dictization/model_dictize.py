@@ -29,14 +29,15 @@ from sqlalchemy.sql import select, false
 
 import ckan.logic as logic
 import ckan.plugins as plugins
-import ckan.lib.helpers as h
 import ckan.lib.dictization as d
 import ckan.authz as authz
 import ckan.lib.search as search
 import ckan.lib.munge as munge
 import ckan.model as model
+from ckan.lib import files
 from ckan.types import Context
-from ckan.common import config
+from ckan.common import config, json
+from ckan.lib.helpers import helper_functions as h
 
 ## package save
 
@@ -329,13 +330,16 @@ def _get_members(context: Context, group: model.Group,
     return q.all()
 
 
-def get_group_dataset_counts() -> dict[str, Any]:
+def get_group_dataset_counts(
+        fq: str ='dataset_type:dataset',
+        permissions_labels: Optional[list[str]]=None) -> dict[str, Any]:
     '''For all public groups, return their dataset counts, as a SOLR facet'''
     query = search.PackageSearchQuery()
-    q: dict[str, Any] = {'q': '', 'fq': 'dataset_type:dataset',
-         'fl': 'groups', 'facet.field': ['groups', 'owner_org'],
-         'facet.limit': -1, 'rows': 1}
-    query.run(q)
+    q: dict[str, Any] = {'q': '', 'fq': fq,
+          'fl': 'groups', 'facet.field': ['groups', 'owner_org'],
+          'facet.limit': -1, 'rows': 1}
+
+    query.run(q, permission_labels=permissions_labels)
     return query.facets
 
 
@@ -461,10 +465,18 @@ def group_dictize(group: model.Group, context: Context,
         #munge here should not have an effect only doing it in case
         #of potential vulnerability of dodgy api input
         image_url = munge.munge_filename_legacy(image_url)
-        result_dict['image_display_url'] = h.url_for_static(
-            'uploads/group/%s' % result_dict.get('image_url'),
-            qualified=True
-        )
+        try:
+            storage = files.get_storage(config["ckan.files.default_storages.group"])
+        except files.exc.UnknownStorageError:
+            result_dict['image_display_url'] = h.url_for_static(
+                'uploads/group/%s' % result_dict.get('image_url'),
+                qualified=True
+            )
+        else:
+            result_dict['image_display_url'] = storage.permanent_link(
+                files.FileData.from_string(image_url)
+            )
+
     return result_dict
 
 def tag_list_dictize(
@@ -516,7 +528,7 @@ def tag_dictize(tag: model.Tag, context: Context,
         q: dict[str, Any] = {
             'q': tag_query, 'fl': 'data_dict', 'wt': 'json', 'rows': 1000}
 
-        package_dicts = [h.json.loads(result['data_dict'])
+        package_dicts = [json.loads(result['data_dict'])
                          for result in query.run(q)['results']]
 
     # Add display_names to tags. At first a tag's display_name is just the
@@ -614,14 +626,23 @@ def user_dictize(
 
     image_url = result_dict.get('image_url')
     result_dict['image_display_url'] = image_url
+
     if image_url and not image_url.startswith('http'):
         # munge here should not have any effect, only doing it in case
         # of potential vulnerability of dodgy api input.
         image_url = munge.munge_filename_legacy(image_url)
-        result_dict['image_display_url'] = h.url_for_static(
-            'uploads/user/%s' % result_dict.get('image_url'),
-            qualified=True
-        )
+
+        try:
+            storage = files.get_storage(config["ckan.files.default_storages.user"])
+        except files.exc.UnknownStorageError:
+            result_dict['image_display_url'] = h.url_for_static(
+                'uploads/user/%s' % result_dict.get('image_url'),
+                qualified=True
+            )
+        else:
+            result_dict['image_display_url'] = storage.permanent_link(
+                files.FileData.from_string(image_url)
+            )
 
     return result_dict
 

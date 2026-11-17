@@ -192,6 +192,9 @@ def resource_view_changed(sender: str, **kwargs: Any):
     result: types.ActionResult.ResourceViewUpdate = kwargs["result"]
     data_dict = kwargs["data_dict"]
 
+    if not result.get("id"):
+        return
+
     if not result:
         id_ = data_dict["id"]
     elif isinstance(result, str):
@@ -208,6 +211,7 @@ def resource_view_changed(sender: str, **kwargs: Any):
 
     if activity_type != "deleted resource view":
         view = model.ResourceView.get(id_)
+
         assert view
         view_dict = dictization.table_dictize(view, context)
     else:
@@ -229,11 +233,13 @@ def resource_view_changed(sender: str, **kwargs: Any):
 
     view_dict['package_id'] = resource.package_id
 
+    permission_labels = get_permission_labels().get_dataset_labels(resource.package)
     activity_dict = {
         "user_id": user_id,
         "object_id": resource.package_id,
         "activity_type": activity_type,
         "data": view_dict,
+        "permission_labels": permission_labels,
     }
     activity_create_context = tk.fresh_context(context)
     activity_create_context['ignore_auth'] = True

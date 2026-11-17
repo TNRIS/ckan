@@ -12,7 +12,6 @@ from sqlalchemy import (
     ForeignKey,
     or_,
     and_,
-    not_,
     text,
     select,
     literal,
@@ -442,7 +441,7 @@ def _group_activity_query(group_id: Union[str, List[str]]) -> QActivity:
         .filter(
             # We only care about activity either on the group itself or on
             # packages within that group.  FIXME: This means that activity that
-            # occured while a package belonged to a group but was then removed
+            # occurred while a package belonged to a group but was then removed
             # will not show up. This may not be desired but is consistent with
             # legacy behaviour.
             or_(
@@ -487,7 +486,7 @@ def _organization_activity_query(org_id: str) -> QActivity:
         .filter(
             # We only care about activity either on the the org itself or on
             # packages within that org.
-            # FIXME: This means that activity that occured while a package
+            # FIXME: This means that activity that occurred while a package
             # belonged to a org but was then removed will not show up. This may
             # not be desired but is consistent with legacy behaviour.
             #
@@ -833,11 +832,7 @@ def _activity_stream_get_filtered_users() -> list[str]:
     """
     users_list = config.get("ckan.hide_activity_from_users")
     if not users_list:
-        from ckan.logic import get_action
-
-        context: Context = {"ignore_auth": True}
-        site_user = get_action("get_site_user")(context, {})
-        users_list = [site_user.get("name")]
+        users_list = [config["ckan.site_id"]]
 
     return model.User.user_ids_for_name_or_id(users_list)
 
@@ -852,14 +847,26 @@ def _filter_activities_by_permission_labels(
 
     # `user_permission_labels` is None when user is sysadmin
     if user_permission_labels is not None:
-        # User can access non-package activities since they don't have labels
-        q = q.filter(
-            or_(
-                or_(Activity.activity_type.is_(None),
-                    not_(Activity.activity_type.endswith("package"))),
-                Activity.permission_labels.op('&&')(
-                    user_permission_labels)
-            )
+        # activitities that have permission labels. For now in includes package
+        # and resource views activities. If new activity types guarded by
+        # permission labels, like resource activities are added, include them
+        # into this filter.
+        with_permissions = or_(
+            Activity.activity_type.endswith("package"),
+            Activity.activity_type.endswith("resource view")
         )
+
+        # nowadays all activities have type, but old portals can include
+        # activities with empty type. This condition can be removed if you
+        # somehow manage to write a migration that maps untyped acctivities
+        # into some generic activity_type.
+        untyped = Activity.activity_type.is_(None)
+
+        # activities with permission labels overlapping labels of the current
+        # user. If someday all activities have permission labels, this is the
+        # only condition that will remain.
+        available = Activity.permission_labels.op('&&')(user_permission_labels)
+
+        q = q.filter(untyped | available | ~with_permissions)
 
     return q

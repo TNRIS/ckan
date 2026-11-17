@@ -1,17 +1,16 @@
-# encoding: utf-8
 from __future__ import annotations
 
-import cgi
-import json
 import logging
-from typing import Any, Optional, Union, cast
+from typing import Any, Optional, Union
 
 from werkzeug.wrappers.response import Response as WerkzeugResponse
 import flask
 from flask.views import MethodView
+import file_keeper as fk
 
 import ckan.lib.base as base
 import ckan.lib.datapreview as lib_datapreview
+from ckan.lib import files
 from ckan.lib.helpers import helper_functions as h
 import ckan.lib.navl.dictization_functions as dict_fns
 import ckan.lib.uploader as uploader
@@ -19,13 +18,13 @@ import ckan.logic as logic
 import ckan.model as model
 import ckan.plugins as plugins
 from ckan.lib import signals
-from ckan.common import _, config, g, request, current_user
+from ckan.common import _, config, g, request, current_user, streaming_response
 from ckan.views.home import CACHE_PARAMETERS
 from ckan.views.dataset import (
     _get_pkg_template, _get_package_type, _setup_template_variables
 )
 
-from ckan.types import Context, Response, ErrorDict
+from ckan.types import Context, Response
 
 Blueprint = flask.Blueprint
 NotFound = logic.NotFound
@@ -167,10 +166,40 @@ def download(package_type: str,
     if rsc.get(u'url_type') == u'upload':
         upload = uploader.get_resource_uploader(rsc)
         filepath = upload.get_path(rsc[u'id'])
-        resp = flask.send_file(filepath, download_name=filename)
+        mimetype = rsc.get('mimetype')
 
-        if rsc.get('mimetype'):
-            resp.headers['Content-Type'] = rsc['mimetype']
+        storage = getattr(upload, "storage", None)
+        if isinstance(storage, fk.Storage):
+            overrides = {}
+            if mimetype:
+                overrides["content_type"] = mimetype
+            location = files.Location(filepath)
+            try:
+                file_data = files.FileData(
+                    location,
+                    size=storage.size(location),
+                    **overrides,
+                )
+            except files.exc.LocationError:
+                return base.abort(404, _('No download is available'))
+
+            if isinstance(storage, files.Storage):
+                resp = storage.as_response(file_data, filename)
+            else:
+                resp = streaming_response(
+                    storage.stream(file_data),
+                    file_data.content_type,
+                )
+                resp.headers.set(
+                    "content-disposition",
+                    "attachment",
+                    filename=filename or file_data.location,
+                )
+
+        else:
+            resp = flask.send_file(filepath, download_name=filename)
+            if mimetype:
+                resp.headers['Content-Type'] = mimetype
         signals.resource_download.send(resource_id)
         return resp
 
@@ -201,9 +230,9 @@ class CreateView(MethodView):
         # see if we have any data that we are trying to save
         data_provided = False
         for key, value in data.items():
-            if (
-                    (value or isinstance(value, cgi.FieldStorage))
-                    and key != u'resource_type'):
+            # in case of empty upload, value will be set to FileStorage without
+            # `filename` attribute, which evaluates to False in boolean context
+            if value and key != "resource_type":
                 data_provided = True
                 break
 
@@ -228,10 +257,8 @@ class CreateView(MethodView):
                     _(u'The dataset {id} could not be found.').format(id=id)
                 )
             except ValidationError as e:
-                errors = cast(
-                    "list[ErrorDict]", e.error_dict.get('resources', [{}]))[-1]
                 error_summary = e.error_summary
-                return self.get(package_type, id, data, errors, error_summary)
+                return self.get(package_type, id, {}, e.error_dict, error_summary)
             return h.redirect_to(u'{}.read'.format(package_type), id=id)
 
         data[u'package_id'] = id
@@ -262,10 +289,8 @@ class CreateView(MethodView):
                     {'id': id, 'state': 'active'}
                 )
             except ValidationError as e:
-                errors = cast(
-                    "list[ErrorDict]", e.error_dict.get('resources', [{}]))[-1]
                 error_summary = e.error_summary
-                return self.get(package_type, id, data, errors, error_summary)
+                return self.get(package_type, id, {}, e.error_dict, error_summary)
             return h.redirect_to(u'{}.read'.format(package_type), id=id)
         elif save_action == u'go-metadata-preview':
             data_dict = get_action(u'package_show')(context, {u'id': id})
@@ -362,6 +387,8 @@ class EditView(MethodView):
                 403,
                 _(u'User %r not authorized to edit %s') % (user, id)
             )
+        except NotFound:
+            return base.abort(404, _(u'Dataset not found'))
         return context
 
     def post(self, package_type: str, id: str,
@@ -405,7 +432,10 @@ class EditView(MethodView):
             errors: Optional[dict[str, Any]] = None,
             error_summary: Optional[dict[str, Any]] = None) -> str:
         context = self._prepare(id)
-        pkg_dict = get_action(u'package_show')(context, {u'id': id})
+        try:
+            pkg_dict = get_action(u'package_show')(context, {u'id': id})
+        except NotFound:
+            return base.abort(404, _(u'Dataset not found'))
 
         try:
             resource_dict = get_action(u'resource_show')(
@@ -604,12 +634,7 @@ def view(package_type: str,
         return base.abort(404, _(u'Resource not found'))
 
     view = None
-    if request.args.get(u'resource_view', u''):
-        try:
-            view = json.loads(request.args.get(u'resource_view', u''))
-        except ValueError:
-            return base.abort(409, _(u'Bad resource view data'))
-    elif view_id:
+    if view_id:
         try:
             view = get_action(u'resource_view_show')(context, {u'id': view_id})
         except (NotFound, NotAuthorized):
@@ -687,13 +712,12 @@ class EditResourceViewView(MethodView):
             )
         )
         data.pop(u'save', None)
-
         to_preview = data.pop(u'preview', False)
         if to_preview:
             context[u'preview'] = True
         to_delete = data.pop(u'delete', None)
         data[u'resource_id'] = resource_id
-        data[u'view_type'] = request.args.get(u'view_type')
+        data[u'view_type'] = view_type = request.form.get(u'view_type')
 
         try:
             if to_delete:
@@ -719,6 +743,8 @@ class EditResourceViewView(MethodView):
                     u'{}_resource.views'.format(package_type),
                     id=id, resource_id=resource_id
                 )
+
+        data[u'view_type'] = view_type
         extra_vars[u'data'] = data
         extra_vars[u'to_preview'] = to_preview
         return self.get(package_type, id, resource_id, view_id, extra_vars)
@@ -729,8 +755,9 @@ class EditResourceViewView(MethodView):
             resource_id: str,
             view_id: Optional[str] = None,
             post_extra: Optional[dict[str, Any]] = None) -> str:
+        to_preview = post_extra["to_preview"] if post_extra else False
         context, extra_vars = self._prepare(id, resource_id)
-        to_preview = extra_vars[u'to_preview']
+
         if post_extra:
             extra_vars.update(post_extra)
 

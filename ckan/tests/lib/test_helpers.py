@@ -4,20 +4,20 @@ import datetime
 import hashlib
 import os
 import sys
+from typing import Any
 
 import pytz
 import tzlocal
 from babel import Locale
 import flask_babel
-
+from faker import Faker
 import pytest
 
+from ckan import plugins as p, types
 from ckan.config.middleware import flask_app
 import ckan.lib.helpers as h
-import ckan.exceptions
+from ckan.exceptions import CkanUrlException
 from ckan.tests import helpers, factories
-
-CkanUrlException = ckan.exceptions.CkanUrlException
 
 
 class BaseUrlFor(object):
@@ -260,8 +260,9 @@ class TestHelpersRenderMarkdown(object):
     @pytest.mark.parametrize(
         "data,output,allow_html",
         [
-            ("<script>moo</script>", "<script>moo</script>", True),
-            ("<script>moo</script>", "moo", False),
+            ("<foo>moo</foo>", "<p><foo>moo</foo></p>", True),
+            ("<foo>moo</foo>", "<p>moo</p>", False),
+            ("<script>moo</script>", "", False), # script and style tags are removed with content by nh3
             (
                 "http://example.com",
                 '<p><a href="http://example.com" target="_blank" rel="nofollow">http://example.com</a></p>',
@@ -282,7 +283,7 @@ class TestHelpersRenderMarkdown(object):
                 u'<ul>\n<li>[Foo (<a href="http://foo.bar" target="_blank" rel="nofollow">http://foo.bar</a>) * Bar] (<a href="http://foo.bar" target="_blank" rel="nofollow">http://foo.bar</a>)</li>\n</ul>',
                 False,
             ),
-            (u"[text](javascript: alert(1))", u"<p><a>text</a></p>", False),
+            (u"[text](javascript: alert(1))", '<p><a rel="noopener noreferrer">text</a></p>', False),
             (
                 u'<p onclick="some.script"><img onmouseover="some.script" src="image.png" /> and text</p>',
                 '<p><img src="image.png"> and text</p>',
@@ -308,7 +309,7 @@ class TestHelpersRenderMarkdown(object):
             ),
             (
                 u"[link](/url?a=1&b=2)",
-                u'<p><a href="/url?a=1&amp;b=2">link</a></p>',
+                u'<p><a href="/url?a=1&amp;b=2" rel="noopener noreferrer">link</a></p>',
                 False,
             ),
             (
@@ -325,12 +326,12 @@ class TestHelpersRenderMarkdown(object):
             ),
             (
                 'tag:"test-tag" foobar',
-                '<p><a href="/dataset/?tags=test-tag">tag:"test-tag"</a> foobar</p>',
+                '<p><a href="/dataset/?tags=test-tag">tag:&quot;test-tag&quot;</a> foobar</p>',
                 False,
             ),
             (
                 'tag:"test tag" foobar',
-                '<p><a href="/dataset/?tags=test+tag">tag:"test tag"</a> foobar</p>',
+                '<p><a href="/dataset/?tags=test+tag">tag:&quot;test tag&quot;</a> foobar</p>',
                 False,
             ),
             (
@@ -347,7 +348,7 @@ class TestHelpersRenderMarkdown(object):
             ),
             (
                 'tag:"Test- _." foobar',
-                '<p><a href="/dataset/?tags=Test-+_.">tag:"Test- _."</a> foobar</p>',
+                '<p><a href="/dataset/?tags=Test-+_.">tag:&quot;Test- _.&quot;</a> foobar</p>',
                 False,
             ),
             (
@@ -357,7 +358,7 @@ class TestHelpersRenderMarkdown(object):
             ),
             (
                 u'tag:"Japanese katakana \u30a1" blah',
-                u'<p><a href="/dataset/?tags=Japanese+katakana+%E3%82%A1">tag:"Japanese katakana \u30a1"</a> blah</p>',
+                u'<p><a href="/dataset/?tags=Japanese+katakana+%E3%82%A1">tag:&quot;Japanese katakana \u30a1&quot;</a> blah</p>',
                 False,
             ),
             (
@@ -382,7 +383,7 @@ class TestHelpersRenderMarkdown(object):
             ),
             (
                 "<a href=\u201dsomelink\u201d>somelink</a>",
-                '<p><a href="\u201dsomelink\u201d">somelink</a></p>',
+                '<p><a href="\u201dsomelink\u201d" rel="noopener noreferrer">somelink</a></p>',
                 False,
             ),
         ],
@@ -399,7 +400,7 @@ class TestHelpersRenderMarkdown(object):
     def test_tag_names_match_simple_punctuation(self):
         """Asserts punctuation and capital letters are matched in the tag name"""
         data = 'tag:"Test- _." foobar'
-        output = '<p><a href="/dataset/?tags=Test-+_.">tag:"Test- _."</a> foobar</p>'
+        output = '<p><a href="/dataset/?tags=Test-+_.">tag:&quot;Test- _.&quot;</a> foobar</p>'
         assert h.render_markdown(data) == output
 
     def test_tag_names_do_not_match_commas(self):
@@ -564,7 +565,7 @@ def test_time_ago_from_timestamp(date, exp):
 
 
 def test_clean_html_disallowed_tag():
-    assert h.clean_html("<b><bad-tag>Hello") == u"<b>&lt;bad-tag&gt;Hello</b>"
+    assert h.clean_html("<b><bad-tag>Hello") == u"<b>Hello</b>"
 
 
 def test_clean_html_non_string():
@@ -652,7 +653,7 @@ class TestBuildNavMain(object):
         assert link == '<a class="css-class" href="https://www.example.com" target="_blank">Example Link</a>'
 
         link2 = h.link_to('display_name', h.url_for('dataset.search', tags='name'), class_='tag')
-        link2 == '<a class="tag" href="/dataset/?tags=name">display_name</a>'
+        assert link2 == '<a class="tag" href="/dataset/?tags=name">display_name</a>'
 
     def test_build_nav_icon(self):
         link = h.build_nav_icon('organization.edit', 'Edit', id='org-id', icon='pencil')
@@ -725,7 +726,7 @@ def test_sanitize_url():
 
 
 def test_extract_markdown():
-    with_html = u"""Data exposed: &mdash;
+    with_html = u"""<i>Data</i> *exposed*: &mdash;
 Size of dump and data set: size?
 Notes: this is the classic RDF source but historically has had some problems with RDF correctness.
 """
@@ -894,7 +895,7 @@ def test_decode_view_request_filters(test_request_context):
     # no matching local returns base
     ({"notes": "untranslated",
       "notes_translated": {'en': 'en', 'en_GB': 'en_GB'}}, 'es', 'untranslated'),
-    # specific returns specfic
+    # specific returns specific
     ({"notes": "untranslated",
       "notes_translated": {'en': 'en', 'en_GB': 'en_GB'}}, 'en_GB', 'en_GB'),
     # variant returns base
@@ -910,23 +911,284 @@ def test_get_translated(data_dict, locale, result, monkeypatch):
 
 
 class TestUploadsEnabled:
+    def test_disabled_with_no_type_no_path_and_no_implementation(self):
+        """In simple case helper returns False."""
+        assert not h.uploads_enabled()
 
-    @pytest.mark.ckan_config("ckan.uploads_enabled", True)
-    def test_uploads_enabled(self):
-        assert h.uploads_enabled() is True
+    @pytest.mark.ckan_config("ckan.storage_path", "/tmp")
+    def test_enabled_with_path_and_no_type(self, reset_storages: Any):
+        """With storage_path set, uploads are enabled - that's a classic behavior."""
+        assert h.uploads_enabled()
 
-    @pytest.mark.ckan_config("ckan.uploads_enabled", False)
-    def test_uploads_disabled(self):
-        assert h.uploads_enabled() is False
+    @pytest.mark.with_plugins({"test_uploader": type("TestUploader", (p.IUploader, p.SingletonPlugin), {})})
+    def test_enabled_with_implementation_and_no_type(self, provide_plugin: types.FixtureProvidePlugin):
+        """With an implementation of IUploader, uploads are enabled - that's a classic behavior."""
+        assert h.uploads_enabled()
 
-    def test_uploads_disabled_on_default_configuration(self):
-        assert h.uploads_enabled() is False
+    @pytest.mark.ckan_config("ckan.files.storage.test.type", "ckan:memory")
+    def test_enabled_with_storage(self):
+        """Default storage implicitly enables uploads for all types."""
+        for type in ["resource", "group", "user", "admin"]:
+            assert h.uploads_enabled(type)
 
-    @pytest.mark.ckan_config("ckan.storage_path", "/some/path")
-    def test_uploads_enabled_with_only_storage_path(self):
-        assert h.uploads_enabled() is True
+    @pytest.mark.ckan_config("ckan.files.storage.test.type", "ckan:unknown")
+    @pytest.mark.ckan_config("ckan.storage_path", "")
+    def test_disabled_without_storage_and_path(self):
+        """Without storages and storage_path uploads are disabled."""
+        for type in ["resource", "group", "user", "admin"]:
+            assert not h.uploads_enabled(type)
 
-    @pytest.mark.usefixtures("with_plugins")
-    @pytest.mark.ckan_config(u"ckan.plugins", "example_iuploader")
-    def test_uploads_enabled_when_iuploader_plugin_exists(self):
-        assert h.uploads_enabled() is True
+    @pytest.mark.ckan_config("ckan.files.storage.test.type", "ckan:unknown")
+    @pytest.mark.ckan_config("ckan.storage_path", "/any/path")
+    def test_enabled_with_path(self):
+        """With storage_path set, uploads are enabled - that's a classic behavior."""
+        for type in ["resource", "group", "user", "admin"]:
+            assert h.uploads_enabled(type)
+
+    @pytest.mark.ckan_config("ckan.files.storage.test.type", "ckan:unknown")
+    @pytest.mark.ckan_config("ckan.files.storage.groups.type", "ckan:memory")
+    @pytest.mark.ckan_config("ckan.files.storage.admins.type", "ckan:memory")
+    def test_enabled_for_specific_storages(self):
+        """When specific storages are configured, uploads are enabled for those types."""
+        assert not h.uploads_enabled("resource")
+        assert h.uploads_enabled("group")
+        assert h.uploads_enabled("admin")
+        assert not h.uploads_enabled("user")
+
+    @pytest.mark.ckan_config("ckan.files.storage.test.type", "ckan:memory")
+    @pytest.mark.ckan_config("ckan.files.storage.test.disabled_capabilities", ["CREATE"])
+    def test_disabled_without_create_capability(self):
+        """Even with a storage configured, if it doesn't have the CREATE capability, uploads are disabled."""
+        for type in ["resource", "group", "user", "admin"]:
+            assert not h.uploads_enabled(type)
+
+
+def test_remove_locale_from_url(app):
+
+    with app.flask_app.test_request_context("/", environ_overrides={"CKAN_LANG": "ca"}):
+
+        assert h.remove_locale_from_url("/ca/dataset") == "/dataset"
+        assert h.remove_locale_from_url("/ca") == "/"
+        assert h.remove_locale_from_url("/ca/dataset/some-dataset") == "/dataset/some-dataset"
+        assert h.remove_locale_from_url("/ca/group/some-group") == "/group/some-group"
+
+    with app.flask_app.test_request_context("/", environ_overrides={"CKAN_LANG": "en"}):
+
+        assert h.remove_locale_from_url("/en/dataset") == "/dataset"
+        assert h.remove_locale_from_url("/en") == "/"
+        assert h.remove_locale_from_url("/dataset") == "/dataset"  # no locale to remove
+
+
+@pytest.mark.ckan_config("ckan.root_path", "/my/custom/path/{{LANG}}/foo")
+def test_remove_locale_from_url_with_root_path(app):
+
+    with app.flask_app.test_request_context("/", environ_overrides={"CKAN_LANG": "ca"}):
+
+        assert h.remove_locale_from_url("/my/custom/path/ca/foo/dataset") == "/my/custom/path/foo/dataset"
+        assert h.remove_locale_from_url("/my/custom/path/ca/foo") == "/my/custom/path/foo/"
+        assert h.remove_locale_from_url("/my/custom/path/ca/foo/dataset/some-dataset") == "/my/custom/path/foo/dataset/some-dataset"
+        assert h.remove_locale_from_url("/my/custom/path/ca/foo/group/some-group") == "/my/custom/path/foo/group/some-group"
+
+
+@pytest.mark.ckan_config("ckan.root_path", "/my/custom/path/{{LANG}}/foo")
+def test_remove_root_path_from_url(app):
+
+    with app.flask_app.test_request_context("/", environ_overrides={"CKAN_LANG": "ca"}):
+
+        # With locale in root path
+        assert h.remove_root_path_from_url("/my/custom/path/ca/foo") == "/"
+        assert h.remove_root_path_from_url("/my/custom/path/ca/foo/dataset/some-dataset") == "/dataset/some-dataset"
+        assert h.remove_root_path_from_url("/my/custom/path/ca/foo/group/some-group") == "/group/some-group"
+
+        # Without locale (fallback)
+        assert h.remove_root_path_from_url("/my/custom/path/foo") == "/"
+        assert h.remove_root_path_from_url("/my/custom/path/foo/dataset/some-dataset") == "/dataset/some-dataset"
+
+
+def test_page_is_active(app):
+
+    with app.flask_app.test_request_context("/"):
+
+        assert h.page_is_active("home.index") is True
+
+        assert h.page_is_active("/") is True
+
+    with app.flask_app.test_request_context("/dataset"):
+
+        assert h.page_is_active("dataset.search") is True
+        assert h.page_is_active("group.index") is False
+
+        assert h.page_is_active("/dataset") is True
+
+    with app.flask_app.test_request_context("/dataset/some-dataset"):
+
+        assert h.page_is_active("dataset.search", active_blueprints=["dataset"]) is True
+        assert h.page_is_active("/dataset", active_blueprints=["dataset"]) is True
+
+        assert h.page_is_active("group.index", active_blueprints=["group"]) is False
+        assert h.page_is_active("/group", active_blueprints=["group"]) is False
+
+    with app.flask_app.test_request_context("/group/some-group"):
+
+        assert (
+            h.page_is_active("dataset.search", active_blueprints=["dataset"]) is False
+        )
+        assert h.page_is_active("/dataset", active_blueprints=["dataset"]) is False
+
+        assert h.page_is_active("group.index", active_blueprints=["group"]) is True
+        assert h.page_is_active("/group", active_blueprints=["group"]) is True
+
+
+def test_page_is_active_with_locale(app):
+
+    with app.flask_app.test_request_context("/", environ_overrides={"CKAN_LANG": "ca"}):
+
+        assert h.page_is_active("/ca") is True
+
+    with app.flask_app.test_request_context(
+        "/dataset", environ_overrides={"CKAN_LANG": "ca"}
+    ):
+
+        assert h.page_is_active("/ca/dataset") is True
+
+    with app.flask_app.test_request_context(
+        "/dataset/some-dataset", environ_overrides={"CKAN_LANG": "ca"}
+    ):
+
+        assert h.page_is_active("/ca/dataset", active_blueprints=["dataset"]) is True
+
+    with app.flask_app.test_request_context(
+        "/group/some-group", environ_overrides={"CKAN_LANG": "ca"}
+    ):
+
+        assert h.page_is_active("/ca/group", active_blueprints=["group"]) is True
+
+
+@pytest.mark.ckan_config("ckan.root_path", "/my/custom/path/{{LANG}}/foo")
+def test_page_is_active_with_locale_and_root_path(app):
+
+    with app.flask_app.test_request_context("/", environ_overrides={"CKAN_LANG": "ca"}):
+
+        assert h.page_is_active("/my/custom/path/ca/foo") is True
+
+    with app.flask_app.test_request_context(
+        "/dataset", environ_overrides={"CKAN_LANG": "ca"}
+    ):
+
+        assert h.page_is_active("/my/custom/path/ca/foo/dataset") is True
+
+    with app.flask_app.test_request_context(
+        "/dataset/some-dataset", environ_overrides={"CKAN_LANG": "ca"}
+    ):
+
+        assert h.page_is_active("/my/custom/path/ca/foo/dataset", active_blueprints=["dataset"]) is True
+
+    with app.flask_app.test_request_context(
+        "/group/some-group", environ_overrides={"CKAN_LANG": "ca"}
+    ):
+
+        assert h.page_is_active("/my/custom/path/ca/foo/group", active_blueprints=["group"]) is True
+
+
+class TestHasMoreFacets:
+    @pytest.mark.parametrize(
+        ("size", "limit", "expected"),
+        [
+            [3, 3, False],
+            [3, 5, False],
+            [3, 1, True],
+            [3, 0, False],
+            [0, 0, False],
+            [0, 3, False],
+        ],
+    )
+    def test_has_more_facets(self, size: int, limit: int, expected: bool, faker: Faker):
+        """Tests that has_more_facets returns True if the number of facets exceeds the limit, and false otherwise."""
+        facets = [{"name": faker.word()} for _ in range(size)]
+        assert h.has_more_facets("test", {"test": {"items": facets}}, limit) is expected
+
+    def test_exclude_active(self, faker: Faker, test_request_context: Any):
+        """Tests the effect of the exclude_active parameter on
+        has_more_facets. If exclude_active is True, the active facet(s) should
+        be excluded from the count when determining if there are more facets
+        than the limit.
+        """
+        facets = [{"name": faker.word()} for _ in range(10)]
+        with test_request_context(
+            "/dataset?test={}&test={}".format(facets[0]["name"], facets[1]["name"])
+        ):
+            # by default, active facets are included in the count, so there are more than 8 facets
+            assert h.has_more_facets("test", {"test": {"items": facets}}, 8) is True
+
+            # with exclude_active=True, the 2 active facets should be excluded
+            # from the count, so there are not more than 8 facets
+            assert (
+                h.has_more_facets("test", {"test": {"items": facets}}, 8, True) is False
+            )
+
+            # with exclude_active=True and a limit of 7, there are more than 7
+            # facets excluding the active ones, so it should return True
+            assert (
+                h.has_more_facets("test", {"test": {"items": facets}}, 7, True) is True
+            )
+
+
+def test_unix_locale_to_bcp47():
+    assert h.unix_locale_to_bcp47('en') == 'en'
+    assert h.unix_locale_to_bcp47('fr_FR') == 'fr-FR'
+
+
+class TestDarkModeEnabled(object):
+    def test_enabled_by_default(self):
+        assert h.dark_mode_enabled() is True
+
+    @pytest.mark.ckan_config("ckan.theme.enable_dark_mode", False)
+    def test_can_be_disabled(self):
+        assert h.dark_mode_enabled() is False
+
+
+def test_get_facet_items_dict(test_request_context: Any):
+    """get_facet_items_dict returns a list of facet items
+    with the correct active state based on the current request parameters."""
+    facets = [
+        {"name": name, "display_name": name, "count": 1}
+        for name in ["aaa", "bbb", "ccc"]
+    ]
+
+    with test_request_context("/dataset?test=ccc&test=aaa"):
+        result = h.get_facet_items_dict("test", {"test": {"items": facets}})
+        assert result[0]["name"] == "aaa"
+        assert result[0]["active"]
+
+        assert result[1]["name"] == "bbb"
+        assert not result[1]["active"]
+
+        assert result[2]["name"] == "ccc"
+        assert result[2]["active"]
+
+
+def test_resource_view_fields(monkeypatch):
+    resource_dict = {'id': 'abcde'}
+    # empty list if datastore is inactive
+    assert h.resource_view_get_fields(resource_dict) == []
+    resource_dict['datastore_active'] = False
+    assert h.resource_view_get_fields(resource_dict) == []
+
+    # populated list if datastore is active
+    resource_dict['datastore_active'] = True
+    monkeypatch.setattr(
+        h.logic, 'get_action',
+        lambda name: (
+            lambda context, data_dict: {
+                'fields': [{'id': 'foo'}, {'id': 'baz'}]
+            }
+        ))
+    assert h.resource_view_get_fields(resource_dict) == ['baz', 'foo']
+
+    # empty list if datastore query fails
+    def raise_validation_error():
+        raise h.logic.ValidationError('test')
+    monkeypatch.setattr(
+        h.logic, 'get_action',
+        lambda name: (lambda context, data_dict: raise_validation_error()))
+    assert h.resource_view_get_fields(resource_dict) == []

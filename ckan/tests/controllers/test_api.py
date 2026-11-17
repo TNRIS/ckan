@@ -51,19 +51,15 @@ def test_sideeffect_action_is_not_get_able(app):
         status=400,
     )
     msg = (
-        "Bad request - JSON Error: Invalid request."
-        " Please use POST method for your request"
+        "Bad request: JSON Error: Invalid request. Please use POST method for your request"
     )
+
     assert msg in resp
 
 
 @pytest.mark.usefixtures("clean_db")
 class TestApiController(object):
-    def test_resource_create_upload_file(
-        self, app, monkeypatch, tmpdir, ckan_config
-    ):
-        monkeypatch.setitem(ckan_config, u"ckan.storage_path", str(tmpdir))
-
+    def test_resource_create_upload_file(self, app):
         user = factories.User()
         user_token = factories.APIToken(user=user["name"])
         pkg = factories.Dataset(creator_user_id=user["id"])
@@ -337,7 +333,7 @@ def test_i18n_only_known_locales_are_accepted(app):
 
     url = url_for("api.i18n_js_translations", ver=2, lang="unknown_lang")
     r = app.get(url, status=400)
-    assert "Bad request - Unknown locale" in r.get_data(as_text=True)
+    assert "Bad request: Unknown locale" in r.get_data(as_text=True)
 
 
 @pytest.mark.usefixtures("clean_db")

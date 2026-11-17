@@ -377,6 +377,41 @@ class TestPackage:
         assert dataset["id"] in href.select_one("a")["href"].split("/", 2)[-1]
         assert dataset["title"] in href.text.strip()
 
+    def test_activity_type_selector_uses_select_as_htmx_trigger(self, app):
+        user = factories.User()
+        dataset = factories.Dataset(user=user)
+
+        url = url_for("activity.package_activity", id=dataset["id"])
+        response = app.get(url)
+        page = BeautifulSoup(response.body)
+
+        select = page.select_one("#activity_types_filter_select")
+        assert select["name"] == "activity_type"
+        assert select["hx-get"] == url
+        assert not page.select("#activity_types_filter_select option[hx-get]")
+
+    def test_activity_type_filter_shows_only_matching_activities(self, app):
+        user = factories.User()
+        dataset = factories.Dataset(user=user)
+        dataset["title"] = "Dataset with changed title"
+        helpers.call_action(
+            "package_update", context={"user": user["name"]}, **dataset
+        )
+
+        url = url_for("activity.package_activity", id=dataset["id"])
+        response = app.get(
+            url, query_string={"activity_type": "new package"}
+        )
+
+        assert "created the dataset" in response
+        assert "updated the dataset" not in response
+
+        page = BeautifulSoup(response.body)
+        selected_option = page.select_one(
+            "#activity_types_filter_select option[selected]"
+        )
+        assert selected_option["value"] == "new package"
+
     def test_create_tag_directly(self, app):
 
         user = factories.User()
@@ -668,6 +703,47 @@ class TestPackage:
         )
         assert helpers.body_contains(response, "Original title")
 
+    @pytest.mark.with_plugins("tracking")
+    def test_read_dataset_as_it_used_to_be_with_tracking(self, app):
+        dataset = factories.Dataset(title="Dataset title")
+        resource = factories.Resource(package_id=dataset["id"])
+        activity = (
+            model.Session.query(Activity)
+            .filter_by(object_id=dataset["id"])
+            .order_by(Activity.timestamp.desc())
+            .limit(1)
+            .one()
+        )
+
+        # Older activity snapshots do not contain the optional tracking fields.
+        archived_package = dict(activity.data["package"])
+        archived_package.pop("tracking_summary", None)
+        archived_package["resources"] = [
+            {
+                key: value
+                for key, value in archived_resource.items()
+                if key != "tracking_summary"
+            }
+            for archived_resource in archived_package["resources"]
+        ]
+        assert archived_package["resources"]
+        assert "tracking_summary" not in archived_package["resources"][0]
+        activity.data = {**activity.data, "package": archived_package}
+        model.repo.commit()
+
+        sysadmin = factories.SysadminWithToken()
+        headers = {"Authorization": sysadmin["token"]}
+        response = app.get(
+            url_for(
+                "activity.package_history",
+                id=dataset["name"],
+                activity_id=activity.id,
+            ),
+            headers=headers,
+        )
+        assert response.status_code == 200
+        assert helpers.body_contains(response, resource["name"])
+
     def test_read_dataset_as_it_used_to_be_but_is_unmigrated(self, app):
         # Renders the dataset using the activity detail, when that Activity was
         # created with an earlier version of CKAN, and it has not been migrated
@@ -719,13 +795,14 @@ class TestPackage:
     def test_read_dataset_as_it_used_to_be_after_deleting_resource(self, app):
         dataset = factories.Dataset(title="Dataset title")
         resource = factories.Resource(package_id=dataset["id"])
-        activity_list = (
+        # Get latest activity (creating the resource)
+        activity = (
             model.Session.query(Activity)
             .filter_by(object_id=dataset["id"])
-            .all()
+            .order_by(Activity.timestamp.desc())
+            .limit(1)
+            .one()
         )
-        # Get latest activity (creating the resource)
-        activity = activity_list[-1]
 
         helpers.call_action(
             "resource_delete",
@@ -747,17 +824,17 @@ class TestPackage:
         assert helpers.body_contains(response, "Dataset title")
         assert helpers.body_contains(response, resource["name"])
 
-    @pytest.mark.flaky(retries=3, delay=1)
     def test_read_resource_as_it_used_to_be(self, app):
         dataset = factories.Dataset(title="Dataset title")
         resource = factories.Resource(package_id=dataset["id"], name="Original name")
-        activity_list = (
+        # Get latest activity (creating the resource)
+        activity = (
             model.Session.query(Activity)
             .filter_by(object_id=dataset["id"])
-            .all()
+            .order_by(Activity.timestamp.desc())
+            .limit(1)
+            .one()
         )
-        # Get latest activity (creating the resource)
-        activity = activity_list[-1]
 
         helpers.call_action(
             "resource_update",
@@ -779,18 +856,19 @@ class TestPackage:
             ),
             headers=headers,
         )
-        assert helpers.body_contains(response, "Original name")
+        assert "Original name" in response.body
 
     def test_read_deleted_resource_as_it_used_to_be(self, app):
         dataset = factories.Dataset(title="Dataset title")
         resource = factories.Resource(package_id=dataset["id"])
-        activity_list = (
+        # Get latest activity (creating the resource)
+        activity = (
             model.Session.query(Activity)
             .filter_by(object_id=dataset["id"])
-            .all()
+            .order_by(Activity.timestamp.desc())
+            .limit(1)
+            .one()
         )
-        # Get latest activity (creating the resource)
-        activity = activity_list[-1]
 
         helpers.call_action(
             "resource_delete",
@@ -810,7 +888,7 @@ class TestPackage:
             ),
             headers=headers,
         )
-        assert helpers.body_contains(response, resource["name"])
+        assert resource["name"] in response.body
 
     def test_changes(self, app):
         user = factories.UserWithToken()

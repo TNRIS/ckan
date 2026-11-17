@@ -9,7 +9,7 @@ import pytz
 
 from typing import Union, cast
 
-from sqlalchemy import engine_from_config, inspect
+from sqlalchemy import engine_from_config
 import sqlalchemy.exc
 
 import ckan.model as model
@@ -21,6 +21,7 @@ from ckan.lib.redis import is_redis_available
 import ckan.lib.search as search
 import ckan.logic as logic
 import ckan.authz as authz
+from ckan.lib import files
 from ckan.lib.webassets_tools import webassets_init, register_core_assets
 
 from ckan.common import CKANConfig, config, config_declaration
@@ -40,7 +41,7 @@ def load_environment(conf: Union[Config, CKANConfig]):
     """
     os.environ['CKAN_CONFIG'] = cast(str, conf['__file__'])
 
-    valid_base_public_folder_names = ['public', 'public-midnight-blue']
+    valid_base_public_folder_names = ['public']
     static_files = conf.get('ckan.base_public_folder', 'public')
     conf['ckan.base_public_folder'] = static_files
 
@@ -112,8 +113,15 @@ def update_config() -> None:
         if from_env:
             config[option] = from_env
 
+    # adapters must be registered before declarations to properly extend
+    # declarations with adapter-specific options
+    files.reset()
+
+    # collect config declarations
     config_declaration.setup()
+    # add default values for the missing config options
     config_declaration.make_safe(config)
+    # validate/convert config options
     config_declaration.normalize(config)
 
     # these are collections of all template/public paths registered by
@@ -146,6 +154,11 @@ def update_config() -> None:
         msg = "Invalid configuration values provided:\n" + msg
         raise CkanConfigurationException(msg)
 
+    # Declared storage config options are valid at this point, storages can be
+    # configured
+    files.storages.reset()
+    files.storages.collect()
+
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     site_url = config.get('ckan.site_url')
@@ -168,13 +181,6 @@ def update_config() -> None:
             "ckan.display_timezone is not 'server' or a valid timezone"
         )
 
-    # Init SOLR settings and check if the schema is compatible
-    # from ckan.lib.search import SolrSettings, check_solr_schema_version
-
-    # lib.search is imported here as we need the config enabled and parsed
-    search.SolrSettings.init(config.get('solr_url'),
-                             config.get('solr_user'),
-                             config.get('solr_password'))
     search.check_solr_schema_version()
 
     lib_plugins.reset_package_plugins()
@@ -188,7 +194,7 @@ def update_config() -> None:
     helpers.load_plugin_helpers()
 
     # Templates and CSS loading from configuration
-    valid_base_templates_folder_names = ['templates', 'templates-midnight-blue']
+    valid_base_templates_folder_names = ['templates']
     templates = config.get('ckan.base_templates_folder')
     config['ckan.base_templates_folder'] = templates
 
@@ -222,27 +228,9 @@ def update_config() -> None:
 
     # clear other caches
     logic.clear_actions_cache()
+    logic.load_actions()
     logic.clear_validators_cache()
     authz.clear_auth_functions_cache()
-
-    # Here we create the site user if they are not already in the database
-    user_table_exists = False
-    try:
-        user_table_exists = inspect(engine).has_table("user")
-    except sqlalchemy.exc.OperationalError:
-        log.debug("DB user table does not exist")
-
-    if user_table_exists:
-        try:
-            logic.get_action('get_site_user')({'ignore_auth': True}, {})
-        except sqlalchemy.exc.ProgrammingError as e:
-            if "UndefinedColumn" in repr(e.orig):
-                log.debug("Old user model detected")
-            else:
-                raise
-        except sqlalchemy.exc.IntegrityError:
-            # Race condition, user already exists.
-            log.debug("Site user already exists")
 
     # Close current session and open database connections to ensure a clean
     # clean environment even if an error occurs later on

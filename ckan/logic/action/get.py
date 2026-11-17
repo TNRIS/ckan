@@ -3,7 +3,6 @@
 '''API functions for searching for and getting data from CKAN.'''
 from __future__ import annotations
 
-import uuid
 import logging
 import json
 import socket
@@ -21,6 +20,7 @@ import ckan.logic as logic
 import ckan.logic.schema
 import ckan.lib.dictization.model_dictize as model_dictize
 import ckan.lib.jobs as jobs
+import ckan.lib.maintain as maintain
 import ckan.lib.navl.dictization_functions
 import ckan.model as model
 import ckan.model.misc as misc
@@ -192,8 +192,31 @@ def member_list(context: Context, data_dict: DataDict) -> ActionResult.MemberLis
         except KeyError:
             return capacity
 
+    members = q.all()
+
+    if obj_type is None or obj_type == 'package':
+        # Private datasets must not be disclosed to users who can't see them.
+        labels = lib_plugins.get_permission_labels()
+
+        user_labels = labels.get_user_dataset_labels(
+            context.get('auth_user_obj'))
+
+        def _can_see_package(table_id: str | None) -> bool:
+            package = model.Package.get(table_id)
+
+            if not package:
+                return False
+
+            return any(
+                dl in user_labels for dl in labels.get_dataset_labels(package))
+
+        members = [
+            m for m in members
+            if m.table_name != 'package' or _can_see_package(m.table_id)
+        ]
+
     return [(m.table_id, m.table_name, translated_capacity(m.capacity))
-            for m in q.all()]
+            for m in members]
 
 
 def package_collaborator_list(context: Context,
@@ -414,6 +437,20 @@ def _group_or_org_list(
     groups = query.all()
 
     if all_fields:
+        # enforce permission filter based on user
+        user = context.get('auth_user_obj')
+        if context.get('ignore_auth') or (user and authz.is_sysadmin(user.name)):
+            labels = None
+        else:
+            labels = lib_plugins.get_permission_labels(
+                ).get_user_dataset_labels(user)
+
+        counts = model_dictize.get_group_dataset_counts(
+            fq='entity_type:package', permissions_labels=labels)
+
+        # won't call get_packages_for_this_group in group_dictize
+        show_context = cast(Context, dict(context, dataset_counts=counts))
+
         action = 'organization_show' if is_org else 'group_show'
         group_list = []
         for group in groups:
@@ -423,7 +460,7 @@ def _group_or_org_list(
                 if key not in data_dict:
                     data_dict[key] = False
 
-            group_list.append(logic.get_action(action)(context, data_dict))
+            group_list.append(logic.get_action(action)(show_context, data_dict))
     else:
         group_list = [getattr(group, ref_group_by) for group in groups]
 
@@ -505,8 +542,8 @@ def organization_list(context: Context,
     :param offset: when ``limit`` is given, the offset to start
         returning organizations from
     :type offset: int
-    :param organizations: a list of names of the groups to return,
-        if given only groups whose names are in this list will be
+    :param organizations: a list of names of the organizations to return,
+        if given only organizations whose names are in this list will be
         returned (optional)
     :type organizations: list of strings
     :param all_fields: return group dictionaries instead of just names. Only
@@ -522,7 +559,7 @@ def organization_list(context: Context,
     :param include_extras: if all_fields, include the organization extra fields
         (optional, default: ``False``)
     :type include_extras: bool
-    :param include_groups: if all_fields, include the organizations the
+    :param include_groups: if all_fields, include the groups the
         organizations are in
         (optional, default: ``False``)
     :type include_groups: bool
@@ -747,7 +784,7 @@ def tag_list(context: Context,
     :param query: a tag name query to search for, if given only tags whose
         names contain this string will be returned (optional)
     :type query: string
-    :param vocabulary_id: the id or name of a vocabulary, if give only tags
+    :param vocabulary_id: the id or name of a vocabulary, if given only tags
         that belong to this vocabulary will be returned (optional)
     :type vocabulary_id: string
     :param all_fields: return full tag dictionaries instead of just names
@@ -842,7 +879,7 @@ def user_list(
     if q:
         query = model.User.search(q, query, user_name=context.get('user'))
     if email:
-        query = query.filter_by(email=email)
+        query = query.filter(_func.lower(model.User.email) == email.lower())
 
     order_by_field = None
     if order_by == 'edits':
@@ -1141,10 +1178,7 @@ def _group_or_org_show(
         packages_field = None
 
     try:
-        if config.get('ckan.auth.public_user_details'):
-            include_users = asbool(data_dict.get('include_users', True))
-        else:
-            include_users = asbool(data_dict.get('include_users', False))
+        include_users = asbool(data_dict.get('include_users', False))
         include_groups = asbool(data_dict.get('include_groups', True))
         include_extras = asbool(data_dict.get('include_extras', True))
         include_followers = asbool(data_dict.get('include_followers', True))
@@ -1219,8 +1253,7 @@ def group_show(context: Context, data_dict: DataDict) -> ActionResult.GroupShow:
          (optional, default: ``True``)
     :type include_extras: bool
     :param include_users: include the group's users
-         (optional, default: ``True`` if ``ckan.auth.public_user_details``
-         is ``True`` otherwise ``False``)
+         (optional, default: ``False``)
     :type include_users: bool
     :param include_groups: include the group's sub groups
          (optional, default: ``True``)
@@ -1238,7 +1271,7 @@ def group_show(context: Context, data_dict: DataDict) -> ActionResult.GroupShow:
 
 
 def organization_show(context: Context, data_dict: DataDict) -> ActionResult.OrganizationShow:
-    '''Return the details of a organization.
+    '''Return the details of an organization.
 
     :param id: the id or name of the organization
     :type id: string
@@ -1252,8 +1285,7 @@ def organization_show(context: Context, data_dict: DataDict) -> ActionResult.Org
          (optional, default: ``True``)
     :type include_extras: bool
     :param include_users: include the organization's users
-         (optional, default: ``True`` if ``ckan.auth.public_user_details``
-         is ``True`` otherwise ``False``)
+         (optional, default: ``False``)
     :type include_users: bool
     :param include_groups: include the organization's sub groups
          (optional, default: ``True``)
@@ -1452,7 +1484,7 @@ def package_autocomplete(
 
     :param q: the string to search for
     :type q: string
-    :param limit: the maximum number of resource formats to return (optional,
+    :param limit: the maximum number of datasets to return (optional,
         default: ``10``)
     :type limit: int
 
@@ -2330,32 +2362,19 @@ def term_translation_show(
     return results
 
 
-# Only internal services are allowed to call get_site_user.
+@maintain.deprecated(
+    "Use `ckan.plugins.toolkit.get_site_user()` instead.", since="3.0.0"
+)
 def get_site_user(context: Context, data_dict: DataDict) -> ActionResult.GetSiteUser:
-    '''Return the ckan site user
+    '''Return the ckan site user.
 
-    :param defer_commit: by default (or if set to false) get_site_user will
-        commit and clean up the current transaction. If set to true, caller
-        is responsible for committing transaction after get_site_user is
-        called. Leaving open connections can cause cli commands to hang!
-        (optional, default: ``False``)
-    :type defer_commit: bool
+    .. deprecated:: 3.0
+        Use :py:func:`ckan.plugins.toolkit.get_site_user` instead.
+
+    Only internal services are allowed to call this action.
     '''
     _check_access('get_site_user', context, data_dict)
-    site_id = config.get('ckan.site_id')
-    user = model.User.get(site_id)
-    if not user:
-        apikey = str(uuid.uuid4())
-        user = model.User(name=site_id,
-                          password=apikey,
-                          apikey=apikey)
-        # make sysadmin
-        user.sysadmin = True
-        model.Session.add(user)
-        model.Session.flush()
-        if not context.get('defer_commit'):
-            model.repo.commit()
-
+    user = model.User.get_site_user()
     return {
         'name': user.name,
         'id': user.id,
@@ -2902,6 +2921,14 @@ def dataset_followee_list(
     datasets = [model.Package.get(followee.object_id)
                 for followee in followees]
     datasets = [dataset for dataset in datasets if dataset is not None]
+
+    # Safety check: check which datasets the user can actually access
+    check_context = logic.fresh_context(context, ignore_auth=False)
+    datasets = [
+        dataset for dataset in datasets
+        if authz.is_authorized_boolean(
+            'package_show', check_context, {'id': dataset.id})
+    ]
 
     # Dictize the list of Package objects.
     return [model_dictize.package_dictize(dataset, context)

@@ -5,7 +5,7 @@ from ckan.types import Context
 import logging
 from typing import Any
 
-from ckan.common import CKANConfig, json
+from ckan.common import CKANConfig, aslist
 import ckan.plugins as p
 import ckanext.resourceproxy.plugin as proxy
 import ckan.lib.datapreview as datapreview
@@ -16,16 +16,16 @@ log = logging.getLogger(__name__)
 def get_formats(config: CKANConfig) -> dict[str, list[str]]:
     out = {}
 
-    out["text_formats"] = config.get(
+    out["text_formats"] = aslist(config.get(
         "ckan.preview.text_formats"
-    ).split()
-    out["xml_formats"] = config.get("ckan.preview.xml_formats").split()
-    out["json_formats"] = config.get(
+    ))
+    out["xml_formats"] = aslist(config.get("ckan.preview.xml_formats"))
+    out["json_formats"] = aslist(config.get(
         "ckan.preview.json_formats"
-    ).split()
-    out["jsonp_formats"] = config.get(
+    ))
+    out["jsonp_formats"] = aslist(config.get(
         "ckan.preview.jsonp_formats"
-    ).split()
+    ))
 
     return out
 
@@ -77,7 +77,7 @@ class TextView(p.SingletonPlugin):
         return False
 
     def setup_template_variables(self, context: Context,
-                                 data_dict: dict[str, Any]):
+                                 data_dict: dict[str, Any]) -> dict[str, Any]:
         metadata = {'text_formats': self.text_formats,
                     'json_formats': self.json_formats,
                     'jsonp_formats': self.jsonp_formats,
@@ -88,9 +88,9 @@ class TextView(p.SingletonPlugin):
         if format_lower in self.jsonp_formats:
             url = data_dict['resource']['url']
 
-        return {'preview_metadata': json.dumps(metadata),
-                'resource_json': json.dumps(data_dict['resource']),
-                'resource_url': json.dumps(url)}
+        return {'preview_metadata': metadata,
+                'resource_json': data_dict['resource'],
+                'resource_url': url}
 
     def view_template(self, context: Context, data_dict: dict[str, Any]):
         return 'text_view.html'

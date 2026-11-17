@@ -28,12 +28,14 @@ from ckan.types import (
     FlattenKey, Schema, Validator, ValidatorFactory
 )
 
+T = TypeVar("T")
 Decorated = TypeVar("Decorated")
 
 log = logging.getLogger(__name__)
 _validate = df.validate
 
 _PG_ERR_CODE = {'unique_violation': '23505'}
+DEFAULT_CACHE_KEY = "context_cache"
 
 
 class NameConflict(Exception):
@@ -493,16 +495,24 @@ def get_action(action: str) -> Action:
 
     '''
 
-    if _actions:
-        if action not in _actions:
-            raise KeyError("Action '%s' not found" % action)
-        return _actions[action]
-    # Otherwise look in all the plugins to resolve all possible First
+    if not _actions:
+        load_actions()
+    if action not in _actions:
+        raise KeyError("Action '%s' not found" % action)
+    return _actions[action]
+
+
+def load_actions() -> None:
+    '''Populate the actions cache with core and plugin action functions.'''
+    # Look in all the plugins to resolve all possible First
     # get the default ones in the ckan/logic/action directory Rather
     # than writing them out in full will use importlib.import_module
     # to load anything from ckan.logic.action that looks like it might
     # be an action
-    for action_module_name in ['get', 'create', 'update', 'delete', 'patch']:
+    for action_module_name in [
+            'get', 'create', 'update', 'delete', 'patch',
+            'file',
+    ]:
         module = importlib.import_module(
             '.' + action_module_name, 'ckan.logic.action')
         for k, v in authz.get_local_functions(module):
@@ -606,8 +616,6 @@ def get_action(action: str) -> Action:
             # type_ignore_reason: custom attribute
             fn.side_effect_free = True  # type: ignore
         _actions[action_name] = fn
-
-    return _actions[action]
 
 
 @overload
@@ -914,7 +922,7 @@ def fresh_context(
     new_context = {
         k: context[k] for k in (
             'session', 'user', 'auth_user_obj',
-            'ignore_auth', 'defer_commit',
+            'ignore_auth', 'defer_commit', DEFAULT_CACHE_KEY
         ) if k in context
     }
     new_context.update(kwargs)

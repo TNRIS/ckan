@@ -18,7 +18,7 @@ There are three type of fixtures available in CKAN:
   one may use function-fixture - late initialization or repeatable
   execution(ex.: cleaning database more than once in a single
   test). But presence of these fixtures in test usually signals that
-  is's a good time to refactor this test.
+  it's a good time to refactor this test.
 
 Deeper explanation can be found in `official documentation
 <https://docs.pytest.org/en/latest/fixture.html>`_
@@ -48,7 +48,7 @@ import ckan.cli
 import ckan.model as model
 from ckan import types
 from ckan.common import config
-from ckan.lib import redis, search
+from ckan.lib import redis, search, files
 
 
 @register
@@ -96,30 +96,37 @@ class APITokenFactory(factories.APIToken):
     pass
 
 
+@register(_name="sysadmin")
 class SysadminFactory(factories.Sysadmin):
     pass
 
 
+@register(_name="sysadmin_with_token")
 class SysadminWithTokenFactory(factories.SysadminWithToken):
     pass
 
 
+@register(_name="user_with_token")
 class UserWithTokenFactory(factories.UserWithToken):
     pass
 
 
+@register(_name="organization")
 class OrganizationFactory(factories.Organization):
     pass
 
 
-register(SysadminFactory, "sysadmin")
-register(SysadminWithTokenFactory, "sysadmin_with_token")
-register(UserWithTokenFactory, "user_with_token")
-register(OrganizationFactory, "organization")
+@register
+class FileFactory(factories.File):
+    pass
 
 
 @pytest.fixture
-def ckan_config(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+def ckan_config(
+        request: pytest.FixtureRequest,
+        monkeypatch: pytest.MonkeyPatch,
+        reset_storages: types.FixtureResetStorages,
+):
     """Allows to override the configuration object used by tests
 
     Takes into account config patches introduced by the ``ckan_config``
@@ -149,12 +156,35 @@ def ckan_config(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch)
 
     """
     _original = copy.deepcopy(config)
+
+    # storages are cached upon first access. When storage-level configuration
+    # patch detected, storage cache is dropped before the test to apply changes
+    # and after the test to restore original state of the storage.
+    storage_changed = False
+
+    prefixes = (
+        files.STORAGE_PREFIX,
+        "ckan.files.default_storages.",
+        "ckan.upload.user.",
+        "ckan.upload.group.",
+        "ckan.max_image_size",
+        "ckan.max_resource_size",
+    )
     for mark in request.node.iter_markers(u"ckan_config"):
-        monkeypatch.setitem(config, *mark.args)
+        key, value = mark.args
+        if key.startswith((prefixes)):
+            storage_changed = True
+        monkeypatch.setitem(config, key, value)
+
+    if storage_changed:
+        reset_storages()
 
     yield config
     config.clear()
     config.update(_original)
+
+    if storage_changed:
+        reset_storages()
 
 
 @pytest.fixture
@@ -369,12 +399,25 @@ def migrate_db_for():
             migrate_db_for("my_plugin")
             assert model.Session.bind.has_table("my_plugin_custom_table")
 
+    To load plugin that is disabled when fixture is called, use `load_plugin`
+    argument of the fixture::
+
+        @pytest.mark.usefixtures("clean_db")
+        def test_migrations_applied(migrate_db_for):
+            migrate_db_for("my_disabled_plugin", load_plugin=True)
+            assert model.Session.bind.has_table("my_plugin_custom_table")
+
     """
     from ckan.cli.db import _run_migrations
 
-    def runner(plugin: str, version: str = "head", forward: bool = True):
+    def runner(
+        plugin: str,
+        version: str = "head",
+        forward: bool = True,
+        load_plugin: bool = False,
+    ):
         assert plugin, "Cannot apply migrations of unknown plugin"
-        _run_migrations(plugin, version, forward)
+        _run_migrations(plugin, version, forward, load_plugin)
 
     return runner
 
@@ -399,7 +442,7 @@ def provide_plugin(
             assert plugins.load("list_plugin") == []
 
     Alternatively, test plugins can be added with `provide_plugin` mark, which
-    inernally relies on the current fixture::
+    internally relies on the current fixture::
 
         @pytest.mark.provide_plugin("list_plugin", list)
         @pytest.mark.ckan_config("ckan.plugins", "list_plugin")
@@ -485,7 +528,7 @@ def with_plugins(
             ...
 
     This will automatically enable ``with_plugins`` for every test, even if
-    it's not required explicitely.
+    it's not required explicitly.
 
     The fixture can be used as mark. It iterates over all arguments and appends
     them to the list of ``ckan.plugins`` before loading. This can be used to
@@ -612,16 +655,11 @@ def non_clean_db(reset_db_once: types.FixtureResetDb):
 
 class FakeFileStorage(FlaskFileStorage):
     def __init__(self, stream: IO[bytes], filename: str):
-        super(FakeFileStorage, self).__init__(stream, filename, "uplod")
+        super(FakeFileStorage, self).__init__(stream, filename, "upload")
 
 
-@pytest.fixture
-def create_with_upload(
-        clean_db: None,
-        ckan_config: types.FixtureCkanConfig,
-        monkeypatch: pytest.MonkeyPatch,
-        tmpdir: Any,
-):
+@pytest.fixture(scope="session")
+def create_with_upload():
     """Shortcut for creating resource/user/org with upload.
 
     Requires content and name for newly created object. By default is
@@ -648,8 +686,6 @@ def create_with_upload(
             assert resource["size"] == 11
 
     """
-    monkeypatch.setitem(ckan_config, u'ckan.storage_path', str(tmpdir))
-
     def factory(
             data: str | bytes,
             filename: str,
@@ -673,3 +709,26 @@ def create_with_upload(
         params.update(kwargs)
         return test_helpers.call_action(action, context, **params)
     return factory
+
+
+@pytest.fixture(scope="session")
+def reset_storages():
+    """Callable for resetting file storages.
+
+    Call this fixture after changing inside test body any option that affects
+    storage behavior, i.e. any option that starts with `ckan.files.storage.`.
+
+    Example::
+
+        def test_upload(self, ckan_config, monkeypatch, tmpdir, reset_storages):
+            monkeypatch.setitem(ckan_config, "ckan.files.storage.test.type", "invalid")
+            reset_storages()
+            # now storages that are derived from the default storage are not
+            # initialized
+
+    """
+    def cleaner():
+        files.storages.reset()
+        files.storages.collect()
+
+    return cleaner

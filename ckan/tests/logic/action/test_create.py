@@ -16,6 +16,7 @@ import ckan.model as model
 import ckan.tests.factories as factories
 import ckan.tests.helpers as helpers
 from ckan.common import config
+from ckan.lib import files
 from ckan.lib.navl.dictization_functions import DataError
 
 from freezegun import freeze_time
@@ -342,7 +343,7 @@ class TestCreateDefaultResourceViews(object):
         # Change default views config setting
         config["ckan.views.default_views"] = ["image_view"]
 
-        context = {"user": helpers.call_action("get_site_user")["name"]}
+        context = {"user": model.User.get_site_user().name}
         created_views = helpers.call_action(
             "package_create_default_resource_views",
             context,
@@ -367,7 +368,7 @@ class TestCreateDefaultResourceViews(object):
         # Change default views config setting
         config["ckan.views.default_views"] = ["image_view"]
 
-        context = {"user": helpers.call_action("get_site_user")["name"]}
+        context = {"user": model.User.get_site_user().name}
         created_views = helpers.call_action(
             "resource_create_default_resource_views",
             context,
@@ -392,7 +393,7 @@ class TestCreateDefaultResourceViews(object):
         # Change default views config setting
         config["ckan.views.default_views"] = ["image_view"]
 
-        context = {"user": helpers.call_action("get_site_user")["name"]}
+        context = {"user": model.User.get_site_user().name}
         created_views = helpers.call_action(
             "resource_create_default_resource_views",
             context,
@@ -507,7 +508,7 @@ class TestResourceCreate:
 
         assert not stored_resource["url"]
 
-    def test_mimetype_by_url(self, monkeypatch, ckan_config, tmpdir):
+    def test_mimetype_by_url(self):
         """The mimetype is guessed from the url
 
         Real world usage would be externally linking the resource and
@@ -520,7 +521,6 @@ class TestResourceCreate:
             "url": "http://localhost/data.csv",
             "name": "A nice resource",
         }
-        monkeypatch.setitem(ckan_config, u'ckan.storage_path', str(tmpdir))
         result = helpers.call_action("resource_create", context, **params)
 
         mimetype = result.pop("mimetype")
@@ -778,27 +778,23 @@ class TestResourceCreate:
             assert m.call_args.args[3] == {0: 0}, 'copy existing resource 0'
 
     def test_upload_file_paths(self, create_with_upload):
-        from ckan.common import config
-        import os
-
-        storage_path = config["ckan.storage_path"]
-
+        storage = files.get_storage("resources")
         dataset = factories.Dataset()
         resource1 = create_with_upload(
             "hello world", "file1.txt", url="http://data1",
             package_id=dataset["id"])
 
-        assert os.path.exists(
-            os.path.join(storage_path, "resources", resource1["id"][:3])
-        )
+        id = resource1["id"]
+        location = f"{id[:3]}/{id[3:6]}/{id[6:]}"
+        assert storage.exists(files.FileData.from_string(location))
 
         resource2 = create_with_upload(
             "bye bye world", "file2.txt", url="http://data2",
             package_id=dataset["id"])
 
-        assert os.path.exists(
-            os.path.join(storage_path, "resources", resource2["id"][:3])
-        )
+        id = resource2["id"]
+        location = f"{id[:3]}/{id[3:6]}/{id[6:]}"
+        assert storage.exists(files.FileData.from_string(location))
 
 
 @pytest.mark.usefixtures("non_clean_db")
@@ -1190,11 +1186,23 @@ class TestGroupCreate(object):
             "group_create", context=context, name=factories.Group.stub().name
         )
 
-        assert len(group["users"]) == 1
         assert group["display_name"] == group["name"]
         assert group["package_count"] == 0
         assert not group["is_organization"]
         assert group["type"] == "group"
+        group_users = helpers.call_action(
+            "group_show",
+            context=context,
+            id=group['id'],
+            include_users=True,
+        )
+        assert group_users["users"] == [{
+            "capacity": "admin",
+            **{
+                k:v for k,v in user.items()
+                if k not in ('apikey', 'email')
+            }
+        }]
 
     def test_create_group_validation_fail(self):
         user = factories.User()
@@ -1318,11 +1326,23 @@ class TestOrganizationCreate(object):
             name=factories.Organization.stub().name,
         )
 
-        assert len(org["users"]) == 1
         assert org["display_name"] == org["name"]
         assert org["package_count"] == 0
         assert org["is_organization"]
         assert org["type"] == "organization"
+        org_users = helpers.call_action(
+            "organization_show",
+            context=context,
+            id=org['id'],
+            include_users=True,
+        )
+        assert org_users["users"] == [{
+            "capacity": "admin",
+            **{
+                k:v for k,v in user.items()
+                if k not in ('apikey', 'email')
+            }
+        }]
 
     def test_create_organization_validation_fail(self):
         user = factories.User()
@@ -1382,7 +1402,6 @@ class TestOrganizationCreate(object):
             type=custom_org_type,
         )
 
-        assert len(org["users"]) == 1
         assert org["display_name"] == org["name"]
         assert org["package_count"] == 0
         assert org["is_organization"]
@@ -1668,6 +1687,27 @@ class TestUserCreateDb():
         user = helpers.call_action("user_create", context=context, **user_dict)
         assert user["id"] == _id
 
+    def test_unique_emails(self):
+        """
+        Active users can only have one unique associated email address.
+        This should be case insensitive.
+        """
+        factories.User(email="example_email@example.com")
+
+        bad_emails = [
+            'example_email@example.com',
+            'ExAmPlE_eMaIl@example.com',
+            'EXAMPLE_EMAIL@EXAMPLE.COM'
+        ]
+
+        for bad_email in bad_emails:
+            with pytest.raises(logic.ValidationError) as err:
+                factories.User(email=bad_email)
+            assert err.value.error_dict == {
+                "email": ["The email address 'example_email@example.com' belongs to a registered user."]
+            }
+
+
 
 @pytest.mark.usefixtures("non_clean_db")
 class TestFollowCommon(object):
@@ -1716,6 +1756,28 @@ class TestFollowDataset(object):
         with pytest.raises(logic.NotAuthorized):
             helpers.call_action("follow_dataset", context, id=dataset["id"])
         context = {"user": user["name"], "ignore_auth": False}
+        helpers.call_action("follow_dataset", context, id=dataset["id"])
+
+    def test_cannot_follow_private_dataset_without_read_access(self):
+        owner = factories.User()
+        org = factories.Organization(user=owner)
+        dataset = factories.Dataset(
+            user=owner, owner_org=org["id"], private=True
+        )
+        user = factories.User()
+
+        context = {"user": user["name"], "ignore_auth": False}
+        with pytest.raises(logic.NotAuthorized):
+            helpers.call_action("follow_dataset", context, id=dataset["id"])
+
+    def test_can_follow_private_dataset_with_read_access(self):
+        owner = factories.User()
+        org = factories.Organization(user=owner)
+        dataset = factories.Dataset(
+            user=owner, owner_org=org["id"], private=True
+        )
+
+        context = {"user": owner["name"], "ignore_auth": False}
         helpers.call_action("follow_dataset", context, id=dataset["id"])
 
     def test_follow_dataset(self):
@@ -1922,6 +1984,54 @@ class TestApiToken(object):
         assert res.user_id == user[u"id"]
         assert res.last_access is None
         assert res.id == jti
+
+    def test_token_created_insert(self):
+        """
+        Sysadmins should be able to insert id, created_at, last_access
+        """
+        from ckan.lib.api_token import decode
+
+        # normal users cannot insert API Tokens
+        user = factories.User()
+        data = helpers.call_action(
+            'api_token_create',
+            context={'model': model, 'user': user['name'],
+                     'ignore_auth': False},
+            user=user['name'],
+            name='token-name-create',
+            id='thisisthetoken',
+            created_at='2025-09-12T19:06:35.989399',
+            last_access='2025-09-12T19:06:35.989399'
+        )
+        token = data['token']
+        jti = decode(token)['jti']
+        res = model.ApiToken.get(jti)
+        assert res.user_id == user['id']
+        assert res.last_access != datetime.datetime.fromisoformat('2025-09-12T19:06:35.989399')
+        assert res.created_at != datetime.datetime.fromisoformat('2025-09-12T19:06:35.989399')
+        assert res.id == jti
+        assert res.id != 'thisisthetoken'
+
+        # sysadmin users can insert API Tokens
+        user = factories.Sysadmin()
+        data = helpers.call_action(
+            'api_token_create',
+            context={'model': model, 'user': user['name'],
+                     'ignore_auth': False},
+            user=user['name'],
+            name='token-name-create',
+            id='thisisthetoken',
+            created_at='2025-09-12T19:06:35.989399',
+            last_access='2025-09-12T19:06:35.989399'
+        )
+        token = data['token']
+        jti = decode(token)['jti']
+        res = model.ApiToken.get(jti)
+        assert res.user_id == user['id']
+        assert res.last_access == datetime.datetime.fromisoformat('2025-09-12T19:06:35.989399')
+        assert res.created_at == datetime.datetime.fromisoformat('2025-09-12T19:06:35.989399')
+        assert res.id == jti
+        assert res.id == 'thisisthetoken'
 
 
 @pytest.mark.usefixtures("non_clean_db")
@@ -2131,7 +2241,7 @@ class TestUserPluginExtras(object):
         assert created_user["id"] == _id
 
 
-@pytest.mark.usefixtures("non_clean_db")
+@pytest.mark.usefixtures("clean_db")
 class TestUserImageUrl(object):
     def test_external_picture(self):
         stub = factories.User.stub()
@@ -2170,7 +2280,7 @@ class TestUserImageUrl(object):
             "upload_field_name": "image_upload",
         }
         with pytest.raises(
-                logic.ValidationError, match="Unsupported upload type"):
+                logic.ValidationError, match="Type .+ is not supported"):
             create_with_upload("hello world", "file.txt", **params)
 
     def test_upload_non_picture_html_fails_without_extra_config(
@@ -2183,7 +2293,7 @@ class TestUserImageUrl(object):
             "upload_field_name": "image_upload",
         }
         with pytest.raises(
-                logic.ValidationError, match="Unsupported upload type"):
+                logic.ValidationError, match="Type .+ is not supported"):
             create_with_upload("<html><body>hello world</body></html>", "file.html", **params)
 
     def test_upload_svg_fails_without_extra_config(
@@ -2196,7 +2306,7 @@ class TestUserImageUrl(object):
             "upload_field_name": "image_upload",
         }
         with pytest.raises(
-                logic.ValidationError, match="Unsupported upload type"):
+                logic.ValidationError, match="Type .+ is not supported"):
             create_with_upload('<svg xmlns="http://www.w3.org/2000/svg"></svg>', "file.svg", **params)
 
     def test_upload_svg_wrong_extension_fails_without_extra_config(
@@ -2209,10 +2319,10 @@ class TestUserImageUrl(object):
             "upload_field_name": "image_upload",
         }
         with pytest.raises(
-                logic.ValidationError, match="Unsupported upload type"):
+                logic.ValidationError, match="Type .+ is not supported"):
             create_with_upload('<svg xmlns="http://www.w3.org/2000/svg"></svg>', "file.png", **params)
 
-    @pytest.mark.ckan_config("ckan.upload.user.types", "image")
+    @pytest.mark.ckan_config("ckan.upload.user.types", ["image"])
     def test_upload_non_picture_with_png_extension(
             self, create_with_upload, faker):
         params = {
@@ -2223,13 +2333,12 @@ class TestUserImageUrl(object):
             "upload_field_name": "image_upload",
         }
         with pytest.raises(
-                logic.ValidationError, match="Unsupported upload type"):
+                logic.ValidationError, match="Type .+ is not supported"):
             create_with_upload("hello world", "file.png", **params)
 
-    @pytest.mark.ckan_config("ckan.upload.user.mimetypes", "")
-    @pytest.mark.ckan_config("ckan.upload.user.types", "")
-    def test_uploads_not_allowed_when_empty_mimetypes_and_types(
-            self, create_with_upload, faker):
+    @pytest.mark.ckan_config("ckan.upload.user.mimetypes", ["image/png"])
+    @pytest.mark.ckan_config("ckan.upload.user.types", ["*"])
+    def test_upload_mimetype_has_higher_priority(self, create_with_upload, faker):
         params = {
             "name": faker.user_name(),
             "email": faker.email(),
@@ -2238,25 +2347,11 @@ class TestUserImageUrl(object):
             "upload_field_name": "image_upload",
         }
         with pytest.raises(
-                logic.ValidationError, match="No uploads allowed for object type"):
-            create_with_upload("hello world", "file.png", **params)
-
-    @pytest.mark.ckan_config("ckan.upload.user.mimetypes", "*")
-    @pytest.mark.ckan_config("ckan.upload.user.types", "image")
-    def test_upload_all_types_allowed_needs_both_options(self, create_with_upload, faker):
-        params = {
-            "name": faker.user_name(),
-            "email": faker.email(),
-            "password": "12345678",
-            "action": "user_create",
-            "upload_field_name": "image_upload",
-        }
-        with pytest.raises(
-                logic.ValidationError, match="Unsupported upload type"):
+                logic.ValidationError, match="Type .+ is not supported"):
             assert create_with_upload(faker.json(), "file.json", **params)
 
-    @pytest.mark.ckan_config("ckan.upload.user.mimetypes", "*")
-    @pytest.mark.ckan_config("ckan.upload.user.types", "*")
+    @pytest.mark.ckan_config("ckan.upload.user.mimetypes", ["*"])
+    @pytest.mark.ckan_config("ckan.upload.user.types", ["*"])
     def test_upload_all_types_allowed(self, create_with_upload, faker):
         params = {
             "name": faker.user_name(),
@@ -2267,7 +2362,7 @@ class TestUserImageUrl(object):
         }
         assert create_with_upload(faker.json(), "file.json", **params)
 
-    @pytest.mark.ckan_config("ckan.upload.user.types", "image")
+    @pytest.mark.ckan_config("ckan.upload.user.types", ["image"])
     def test_upload_picture(self, create_with_upload, faker):
         params = {
             "name": faker.user_name(),
@@ -2278,7 +2373,7 @@ class TestUserImageUrl(object):
         }
         assert create_with_upload(faker.image(), "file.png", **params)
 
-    @pytest.mark.ckan_config("ckan.upload.user.types", "image")
+    @pytest.mark.ckan_config("ckan.upload.user.types", ["image"])
     def test_upload_picture_extension_enforced(self, create_with_upload, faker):
         params = {
             "name": faker.user_name(),
@@ -2426,6 +2521,29 @@ class TestTagCreate:
 
 @pytest.mark.usefixtures("non_clean_db")
 class TestMemberCreate2:
+    @pytest.mark.usefixtures("clean_index")
+    def test_member_create_reindexes_package_groups(self):
+        group = factories.Group()
+        package = factories.Dataset()
+
+        def get_search_result_groups():
+            results = helpers.call_action(
+                "package_search", q=package["title"]
+            )["results"]
+            return [group["name"] for group in results[0]["groups"]]
+
+        assert get_search_result_groups() == []
+
+        helpers.call_action(
+            "member_create",
+            object=package["id"],
+            id=group["id"],
+            object_type="package",
+            capacity="public",
+        )
+
+        assert get_search_result_groups() == [group["name"]]
+
     def test_member_create_accepts_object_name_or_id(self):
         org = factories.Organization()
         package = factories.Dataset()
