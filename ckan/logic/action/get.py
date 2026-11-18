@@ -195,7 +195,6 @@ def member_list(context: Context, data_dict: DataDict) -> ActionResult.MemberLis
         except KeyError:
             return capacity
 
-<<<<<<< HEAD
     members = q.all()
 
     if obj_type is None or obj_type == 'package':
